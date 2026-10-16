@@ -25,6 +25,7 @@ struct Key {
     extra: u64,
     /// Dragging uses a small proxy canvas so the moving page never goes blank.
     proxy: bool,
+    skip: Vec<ShapeId>,
     /// The pasteboard region the slide's drawing calls for (canvas only).
     want: Region,
 }
@@ -51,6 +52,20 @@ struct PendingCanvas {
     receiver: Receiver<RenderedCanvas>,
 }
 
+#[derive(Clone, PartialEq)]
+struct DragShapeKey {
+    slide: usize,
+    id: ShapeId,
+    size: (u64, u64),
+    scale: u64,
+}
+
+struct DragShapeEntry {
+    key: DragShapeKey,
+    rect: Rect,
+    tex: TextureHandle,
+}
+
 #[derive(Default)]
 pub struct Textures {
     canvas: Option<Entry>,
@@ -68,6 +83,8 @@ pub struct Textures {
     performance_mode: bool,
     pending: Option<PendingCanvas>,
     proxy_texture_id: u64,
+    drag_snapshot: bool,
+    drag_shape: Option<DragShapeEntry>,
 }
 
 const HIGH_PERFORMANCE_MAX_PIXELS: u64 = 1_800_000;
@@ -122,6 +139,8 @@ impl Textures {
         self.performance_mode = enabled;
         self.canvas = None;
         self.pending = None;
+        self.drag_snapshot = false;
+        self.drag_shape = None;
         self.estimate = None;
         self.drawn = None;
         if enabled {
@@ -183,6 +202,7 @@ impl Textures {
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
         proxy: bool,
+        skip: &[ShapeId],
     ) -> Option<(TextureHandle, Region)> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
@@ -200,6 +220,10 @@ impl Textures {
             _ => estimate,
         };
         let want = deckcraft_render::pasteboard_region(size, scale, reach, visible);
+        if !proxy {
+            self.drag_snapshot = false;
+            self.drag_shape = None;
+        }
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
@@ -208,8 +232,30 @@ impl Textures {
             language: if edit { crate::i18n::language(ctx) } else { crate::i18n::Language::English },
             extra: extra ^ grayscale as u64,
             proxy,
+            skip: skip.to_vec(),
             want,
         };
+        if proxy && !skip.is_empty() && self.drag_snapshot {
+            return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
+        }
+        if proxy && !skip.is_empty() {
+            let t0 = crate::now_ms();
+            let opts = RenderOpts {
+                scale,
+                edit,
+                gif_times,
+                threads: threads(),
+                offset: want.offset(),
+                size: Some(want.size()),
+                skip,
+                placeholder_prompt: crate::i18n::placeholder_prompt(ctx),
+                ..Default::default()
+            };
+            let (image, drawn) = deckcraft_render::render_slide_drawn(p, index, &opts);
+            self.commit_canvas(ctx, key, slide, master, want, RenderedCanvas { image, drawn, elapsed_ms: crate::now_ms() - t0 }, grayscale, index);
+            self.drag_snapshot = true;
+            return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
+        }
         if self.performance_mode {
             if let Some(pending) = self.pending.take() {
                 match pending.receiver.try_recv() {
@@ -376,6 +422,35 @@ impl Textures {
         self.drawn = None;
         self.thumbs.clear();
         self.pending = None;
+        self.drag_snapshot = false;
+        self.drag_shape = None;
+    }
+
+    /// Render a selected shape once at proxy resolution. Moving it only updates the destination
+    /// rectangle, so pointer motion never uploads a new full-size image.
+    pub fn drag_shape(
+        &mut self,
+        ctx: &egui::Context,
+        p: &Presentation,
+        slide: &Slide,
+        id: ShapeId,
+        bounds: Rect,
+        scale: f64,
+    ) -> Option<(TextureHandle, Rect)> {
+        let key =
+            DragShapeKey { slide: slide.id.0 as usize, id, size: (bounds.width().to_bits(), bounds.height().to_bits()), scale: scale.to_bits() };
+        if let Some(entry) = &mut self.drag_shape
+            && entry.key == key
+        {
+            entry.rect = bounds;
+            return Some((entry.tex.clone(), entry.rect));
+        }
+        let image = deckcraft_render::render_shape(p, slide, id, scale)?;
+        self.proxy_texture_id = self.proxy_texture_id.wrapping_add(1);
+        let tex = ctx.load_texture(format!("drag-shape-{}", self.proxy_texture_id), to_color_image(&image, false), TextureOptions::LINEAR);
+        let rect = bounds.inflate(8.0, 8.0);
+        self.drag_shape = Some(DragShapeEntry { key, rect, tex: tex.clone() });
+        Some((tex, rect))
     }
 
     /// A thumbnail texture; renders at most `budget` new thumbnails per frame (returns None when
@@ -393,6 +468,7 @@ impl Textures {
             language: crate::i18n::Language::English,
             extra: 0,
             proxy: false,
+            skip: vec![],
             want: Region::slide(width_px, h),
         };
         self.clock += 1;
