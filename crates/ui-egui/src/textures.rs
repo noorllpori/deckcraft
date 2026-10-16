@@ -23,6 +23,8 @@ struct Key {
     edit: bool,
     language: crate::i18n::Language,
     extra: u64,
+    /// Dragging uses a small proxy canvas so the moving page never goes blank.
+    proxy: bool,
     /// The pasteboard region the slide's drawing calls for (canvas only).
     want: Region,
 }
@@ -69,6 +71,8 @@ pub struct Textures {
 
 const HIGH_PERFORMANCE_MAX_PIXELS: u64 = 1_800_000;
 const HIGH_PERFORMANCE_MAX_SIDE: u32 = 2_048;
+const DRAG_PROXY_MAX_PIXELS: u64 = 360_000;
+const DRAG_PROXY_MAX_SIDE: u32 = 960;
 
 pub fn to_color_image(img: &Image, grayscale: bool) -> ColorImage {
     let w = img.width as usize;
@@ -139,6 +143,24 @@ impl Textures {
         (((w as f64 * factor).round() as u32).max(1), ((h as f64 * factor).round() as u32).max(1))
     }
 
+    /// A deliberately small canvas used while an object is being dragged. It is a visual proxy,
+    /// not the final render; once the pointer is released, the normal adaptive canvas is queued.
+    pub fn proxy_canvas_size(&self, size: (u32, u32)) -> (u32, u32) {
+        if !self.performance_mode {
+            return size;
+        }
+        let (w, h) = size;
+        let area = u64::from(w).saturating_mul(u64::from(h));
+        let side = w.max(h);
+        if area <= DRAG_PROXY_MAX_PIXELS && side <= DRAG_PROXY_MAX_SIDE {
+            return size;
+        }
+        let area_scale = (DRAG_PROXY_MAX_PIXELS as f64 / area.max(1) as f64).sqrt();
+        let side_scale = DRAG_PROXY_MAX_SIDE as f64 / side.max(1) as f64;
+        let factor = area_scale.min(side_scale).min(1.0);
+        (((w as f64 * factor).round() as u32).max(1), ((h as f64 * factor).round() as u32).max(1))
+    }
+
     /// The canvas texture for slide `index`, the slide being `size` pixels, and the region it
     /// covers: the slide, grown over the pasteboard to show what reaches off the slide within
     /// `visible` (the canvas, in pixels from the slide's top-left corner). `extra` changes with the
@@ -155,6 +177,7 @@ impl Textures {
         extra: u64,
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
+        proxy: bool,
     ) -> Option<(TextureHandle, Region)> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
@@ -179,6 +202,7 @@ impl Textures {
             edit,
             language: if edit { crate::i18n::language(ctx) } else { crate::i18n::Language::English },
             extra: extra ^ grayscale as u64,
+            proxy,
             want,
         };
         if self.performance_mode {
@@ -186,6 +210,14 @@ impl Textures {
                 match pending.receiver.try_recv() {
                     Ok(rendered) if pending.key == key => {
                         self.commit_canvas(ctx, key.clone(), slide.clone(), master.clone(), want, rendered, grayscale, index);
+                    }
+                    Ok(rendered) if proxy && pending.key.proxy => {
+                        // A drag changes the slide Arc on every pointer event. Keep the most
+                        // recent completed proxy visible while the next compressed frame catches
+                        // up instead of exposing an empty canvas.
+                        let pending_key = pending.key.clone();
+                        let pending_region = pending_key.want;
+                        self.commit_canvas(ctx, pending_key, slide.clone(), master.clone(), pending_region, rendered, grayscale, index);
                     }
                     Ok(_) => {}
                     Err(TryRecvError::Empty) => self.pending = Some(pending),
@@ -202,7 +234,7 @@ impl Textures {
             if self.pending.is_none() {
                 // Never show a different page while the newly selected page is rendering. The
                 // old page's texture is released here, keeping the active-page memory bound.
-                if self.canvas.as_ref().is_some_and(|e| e.key.slide != key.slide) {
+                if !proxy && self.canvas.as_ref().is_some_and(|e| e.key.slide != key.slide) {
                     self.canvas = None;
                 }
                 self.start_async_canvas(p, index, key.clone(), scale, edit, gif_times, crate::i18n::placeholder_prompt(ctx));
@@ -346,6 +378,7 @@ impl Textures {
             edit: false,
             language: crate::i18n::Language::English,
             extra: 0,
+            proxy: false,
             want: Region::slide(width_px, h),
         };
         self.clock += 1;

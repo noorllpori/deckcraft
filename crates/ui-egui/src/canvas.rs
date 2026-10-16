@@ -110,7 +110,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     painter.rect_filled(slide_rect.translate(vec2(0.0, 1.5)).expand(1.0), CornerRadius::same(2), t.shadow);
     let ppp = ui.ctx().pixels_per_point();
     let px = ((slide_rect.width() * ppp).round().max(1.0) as u32, (slide_rect.height() * ppp).round().max(1.0) as u32);
-    let px = app.textures.canvas_size(px);
+    let proxy = app.ui.performance_mode && app.session.tool.dragging();
+    let px = if proxy { app.textures.proxy_canvas_size(px) } else { app.textures.canvas_size(px) };
     let now = ui.input(|i| i.time);
     let gifs = match app.session.active() {
         Some(d) if d.selection.target == Target::Slides => app.media.gifs(&d.doc, d.selection.slide, now, &app.session.gif_paused),
@@ -126,7 +127,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
+            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, proxy)
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),

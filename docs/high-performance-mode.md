@@ -14,6 +14,8 @@ When enabled, the editor:
   2048-pixel maximum side), so zooming in does not allocate a texture for the entire logical zoom;
 - renders the active page on a native worker thread and repaints when it is ready, keeping pointer
   and page navigation responsive while the page is being prepared;
+- uses a compressed proxy canvas while an object is dragged, keeping the moving page visible while
+  the next proxy frame is prepared, then queues the normal adaptive render after release;
 - keeps a small, low-resolution thumbnail cache instead of retaining hundreds of page textures.
 
 The document model, saved presentation, export output, and slide-show rendering are unchanged.
