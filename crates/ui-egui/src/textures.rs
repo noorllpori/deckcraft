@@ -67,6 +67,7 @@ pub struct Textures {
     pub last_render_ms: f64,
     performance_mode: bool,
     pending: Option<PendingCanvas>,
+    proxy_texture_id: u64,
 }
 
 const HIGH_PERFORMANCE_MAX_PIXELS: u64 = 1_800_000;
@@ -301,6 +302,15 @@ impl Textures {
         self.drawn = Some((index, rendered.drawn));
         self.last_render_ms = rendered.elapsed_ms;
         let ci = to_color_image(&rendered.image, grayscale);
+        if key.proxy {
+            // Do not mutate the texture currently being painted. Upload a complete proxy to a
+            // new GPU texture first, then replace the entry in one step; this removes the visible
+            // blank frame caused by TextureHandle::set during rapid pointer drags.
+            self.proxy_texture_id = self.proxy_texture_id.wrapping_add(1);
+            let tex = ctx.load_texture(format!("slide-canvas-proxy-{}", self.proxy_texture_id), ci, TextureOptions::LINEAR);
+            self.canvas = Some(Entry { key, tex, region, _slide: slide, _master: master, stamp: 0 });
+            return;
+        }
         let tex = match self.canvas.take() {
             Some(mut e) => {
                 e.tex.set(ci, TextureOptions::LINEAR);
