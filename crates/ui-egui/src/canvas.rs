@@ -110,6 +110,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     painter.rect_filled(slide_rect.translate(vec2(0.0, 1.5)).expand(1.0), CornerRadius::same(2), t.shadow);
     let ppp = ui.ctx().pixels_per_point();
     let px = ((slide_rect.width() * ppp).round().max(1.0) as u32, (slide_rect.height() * ppp).round().max(1.0) as u32);
+    let px = app.textures.canvas_size(px);
     let now = ui.input(|i| i.time);
     let gifs = match app.session.active() {
         Some(d) if d.selection.target == Target::Slides => app.media.gifs(&d.doc, d.selection.slide, now, &app.session.gif_paused),

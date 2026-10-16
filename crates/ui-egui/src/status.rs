@@ -50,12 +50,15 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         }
         let mut right = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(Rect::from_min_max(pos2(rect.max.x - 560.0, rect.min.y), pos2(rect.max.x - 8.0, rect.max.y)))
+                .max_rect(Rect::from_min_max(pos2(rect.max.x - 690.0, rect.min.y), pos2(rect.max.x - 8.0, rect.max.y)))
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.spacing_mut().item_spacing.x = 4.0;
         if small_icon(&mut right, Icon::FitSmall, "Fit slide to current window", false).clicked() {
             app.ui.zoom = None;
+        }
+        if labeled(&mut right, Icon::FitToWindow, "High Performance Mode", app.ui.performance_mode).clicked() {
+            let _ = app.run("view.performance", json!({"on": !app.ui.performance_mode}));
         }
         let pct = (app.ui.zoom.unwrap_or(app.canvas_scale) * 100.0).round();
         let lbl = right.add(egui::Label::new(egui::RichText::new(format!("{pct}%")).size(12.0).color(t.text_dim)).sense(Sense::click()));
