@@ -230,6 +230,15 @@ impl Default for View {
 
 /// About ▸ Contributors: a name toggle, a sort, and the list as a grab bag or a table.
 pub fn contributors_ui(ui: &mut egui::Ui) {
+    ui.label(RichText::new(crate::i18n::tr(ui.ctx(), "DeckCraft Performance Edition")).strong());
+    ui.label(crate::i18n::tr(ui.ctx(), "Performance optimization and Simplified Chinese localization"));
+    ui.horizontal_wrapped(|ui| {
+        ui.hyperlink_to("葡萄拌大蒜 (@noorllpori)", "https://github.com/noorllpori");
+        ui.label("·");
+        ui.hyperlink_to(crate::i18n::tr(ui.ctx(), "Bilibili profile"), "https://space.bilibili.com/38222138?spm_id_from=333.1007.0.0");
+    });
+    ui.separator();
+    ui.label(RichText::new(crate::i18n::tr(ui.ctx(), "Base DeckCraft contributors")).strong());
     let id = egui::Id::new("credits_view");
     let mut v = ui.data_mut(|d| d.get_temp::<View>(id)).unwrap_or_default();
     ui.horizontal_wrapped(|ui| {

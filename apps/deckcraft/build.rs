@@ -14,8 +14,8 @@ fn main() {
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/app-icon/deckcraft.ico")
-        .set("ProductName", "DeckCraft")
-        .set("FileDescription", "DeckCraft presentations")
+        .set("ProductName", "DeckCraft 性能版")
+        .set("FileDescription", "DeckCraft 性能版演示文稿")
         .set("CompanyName", "Learning Machines LLC")
         .set("LegalCopyright", "Copyright (c) the DeckCraft authors. MIT OR Apache-2.0.")
         .set("OriginalFilename", "deckcraft.exe")

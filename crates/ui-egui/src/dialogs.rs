@@ -36,6 +36,7 @@ fn title(id: &str) -> &'static str {
         "headerFooter" => "Header and Footer",
         "hyperlink" => "Insert Hyperlink",
         "setupShow" => "Set Up Slide Show",
+        "playbackPrecompile" => "Playback Precompile",
         "zoom" => "Zoom",
         "comment" => "New Comment",
         "altText" => "Alt Text",
@@ -263,6 +264,9 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut}));
             }
             ok || cancel
+        }
+        "playbackPrecompile" => {
+            crate::playback::menu(app, ui)
         }
         "quit" => {
             let names: Vec<String> = app.session.documents().iter().filter(|d| d.is_dirty()).map(|d| d.title()).collect();

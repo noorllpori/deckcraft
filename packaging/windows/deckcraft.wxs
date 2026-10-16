@@ -12,14 +12,14 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-      Name="DeckCraft"
+      Name="DeckCraft 性能版"
       Manufacturer="Learning Machines LLC"
       Version="$(var.Version)"
       UpgradeCode="6F9C69E7-7825-40D2-BF26-C274DA676425"
       Scope="perMachine"
       Compressed="yes"
       Language="1033">
-    <SummaryInformation Description="DeckCraft presentations and slide shows" Manufacturer="Learning Machines LLC" />
+    <SummaryInformation Description="DeckCraft 性能版演示文稿和幻灯片放映" Manufacturer="Learning Machines LLC" />
     <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other
          (MSI versions are numeric, so 1.2.3-rc.1 and 1.2.3-rc.2 are both 1.2.3). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes"
@@ -37,7 +37,7 @@
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
 
-    <Feature Id="Main" Title="DeckCraft" Level="1">
+    <Feature Id="Main" Title="DeckCraft 性能版" Level="1">
       <ComponentGroupRef Id="DeckcraftFiles" />
     </Feature>
   </Package>
@@ -46,8 +46,8 @@
     <ComponentGroup Id="DeckcraftFiles" Directory="INSTALLFOLDER">
       <Component Id="DeckcraftApp" Guid="D87EA444-41A4-4C19-922E-66D1A29461FF">
         <File Id="DeckcraftExe" Source="$(var.BinDir)\deckcraft.exe" KeyPath="yes">
-          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="DeckCraft"
-              Description="DeckCraft presentations and slide shows" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="DeckCraft 性能版"
+              Description="DeckCraft 性能版演示文稿和幻灯片放映" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
               Icon="DeckcraftIcon.ico" IconIndex="0" />
         </File>
 
@@ -59,7 +59,7 @@
         </ProgId>
 
         <!-- "Open with" for PowerPoint formats, without becoming the default. -->
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe" Name="FriendlyAppName" Value="DeckCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe" Name="FriendlyAppName" Value="DeckCraft 性能版" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".deckcraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".pptx" Value="" Type="string" />

@@ -52,20 +52,6 @@ struct PendingCanvas {
     receiver: Receiver<RenderedCanvas>,
 }
 
-#[derive(Clone, PartialEq)]
-struct DragShapeKey {
-    slide: usize,
-    id: ShapeId,
-    size: (u64, u64),
-    scale: u64,
-}
-
-struct DragShapeEntry {
-    key: DragShapeKey,
-    rect: Rect,
-    tex: TextureHandle,
-}
-
 #[derive(Default)]
 pub struct Textures {
     canvas: Option<Entry>,
@@ -84,7 +70,6 @@ pub struct Textures {
     pending: Option<PendingCanvas>,
     proxy_texture_id: u64,
     drag_snapshot: bool,
-    drag_shape: Option<DragShapeEntry>,
 }
 
 const HIGH_PERFORMANCE_MAX_PIXELS: u64 = 1_800_000;
@@ -140,7 +125,6 @@ impl Textures {
         self.canvas = None;
         self.pending = None;
         self.drag_snapshot = false;
-        self.drag_shape = None;
         self.estimate = None;
         self.drawn = None;
         if enabled {
@@ -222,7 +206,6 @@ impl Textures {
         let want = deckcraft_render::pasteboard_region(size, scale, reach, visible);
         if !proxy {
             self.drag_snapshot = false;
-            self.drag_shape = None;
         }
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
@@ -235,10 +218,10 @@ impl Textures {
             skip: skip.to_vec(),
             want,
         };
-        if proxy && !skip.is_empty() && self.drag_snapshot {
-            return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
-        }
-        if proxy && !skip.is_empty() {
+        if proxy {
+            // Render a complete, fixed-size drag frame. This keeps the actual
+            // shape order (including text over pictures) and avoids switching
+            // between differently sized textures while the pointer moves.
             let t0 = crate::now_ms();
             let opts = RenderOpts {
                 scale,
@@ -247,13 +230,20 @@ impl Textures {
                 threads: threads(),
                 offset: want.offset(),
                 size: Some(want.size()),
-                skip,
                 placeholder_prompt: crate::i18n::placeholder_prompt(ctx),
                 ..Default::default()
             };
             let (image, drawn) = deckcraft_render::render_slide_drawn(p, index, &opts);
-            self.commit_canvas(ctx, key, slide, master, want, RenderedCanvas { image, drawn, elapsed_ms: crate::now_ms() - t0 }, grayscale, index);
-            self.drag_snapshot = true;
+            self.commit_canvas(
+                ctx,
+                key,
+                slide,
+                master,
+                want,
+                RenderedCanvas { image, drawn, elapsed_ms: crate::now_ms() - t0 },
+                grayscale,
+                index,
+            );
             return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
         }
         if self.performance_mode {
@@ -322,13 +312,11 @@ impl Textures {
         self.drawn = Some((index, drawn));
         self.last_render_ms = crate::now_ms() - t0;
         let ci = to_color_image(&img, grayscale);
-        let tex = match self.canvas.take() {
-            Some(mut e) => {
-                e.tex.set(ci, TextureOptions::LINEAR);
-                e.tex
-            }
-            None => ctx.load_texture("slide-canvas", ci, TextureOptions::LINEAR),
-        };
+        // Upload the completed normal frame to a fresh texture, then swap the
+        // entry atomically. Mutating the texture used by the previous frame can
+        // expose a one-frame blank/partially uploaded image when drag ends.
+        self.proxy_texture_id = self.proxy_texture_id.wrapping_add(1);
+        let tex = ctx.load_texture(format!("slide-canvas-{}", self.proxy_texture_id), ci, TextureOptions::LINEAR);
         self.canvas = Some(Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: 0 });
         Some((tex, region))
     }
@@ -357,13 +345,10 @@ impl Textures {
             self.canvas = Some(Entry { key, tex, region, _slide: slide, _master: master, stamp: 0 });
             return;
         }
-        let tex = match self.canvas.take() {
-            Some(mut e) => {
-                e.tex.set(ci, TextureOptions::LINEAR);
-                e.tex
-            }
-            None => ctx.load_texture("slide-canvas", ci, TextureOptions::LINEAR),
-        };
+        // Keep the previous texture intact until the new frame is fully uploaded.
+        // This is especially important on the first frame after a drag ends.
+        self.proxy_texture_id = self.proxy_texture_id.wrapping_add(1);
+        let tex = ctx.load_texture(format!("slide-canvas-{}", self.proxy_texture_id), ci, TextureOptions::LINEAR);
         self.canvas = Some(Entry { key, tex, region, _slide: slide, _master: master, stamp: 0 });
     }
 
@@ -423,34 +408,6 @@ impl Textures {
         self.thumbs.clear();
         self.pending = None;
         self.drag_snapshot = false;
-        self.drag_shape = None;
-    }
-
-    /// Render a selected shape once at proxy resolution. Moving it only updates the destination
-    /// rectangle, so pointer motion never uploads a new full-size image.
-    pub fn drag_shape(
-        &mut self,
-        ctx: &egui::Context,
-        p: &Presentation,
-        slide: &Slide,
-        id: ShapeId,
-        bounds: Rect,
-        scale: f64,
-    ) -> Option<(TextureHandle, Rect)> {
-        let key =
-            DragShapeKey { slide: slide.id.0 as usize, id, size: (bounds.width().to_bits(), bounds.height().to_bits()), scale: scale.to_bits() };
-        if let Some(entry) = &mut self.drag_shape
-            && entry.key == key
-        {
-            entry.rect = bounds;
-            return Some((entry.tex.clone(), entry.rect));
-        }
-        let image = deckcraft_render::render_shape(p, slide, id, scale)?;
-        self.proxy_texture_id = self.proxy_texture_id.wrapping_add(1);
-        let tex = ctx.load_texture(format!("drag-shape-{}", self.proxy_texture_id), to_color_image(&image, false), TextureOptions::LINEAR);
-        let rect = bounds.inflate(8.0, 8.0);
-        self.drag_shape = Some(DragShapeEntry { key, rect, tex: tex.clone() });
-        Some((tex, rect))
     }
 
     /// A thumbnail texture; renders at most `budget` new thumbnails per frame (returns None when

@@ -59,6 +59,11 @@
 ## What works today
 
 DeckCraft is in alpha, heading for beta (see the [roadmap](ROADMAP.md)).
+
+This checkout also contains the **DeckCraft 性能版** performance edition, with large-deck
+rendering, playback precompilation and Simplified Chinese localization improvements. See
+[`PERFORMANCE_EDITION.md`](PERFORMANCE_EDITION.md) for the separate performance-edition credits
+and Windows upgrade behavior.
 Today it can:
 
 - **Make decks**: slide masters and eleven layouts with placeholders that inherit position and

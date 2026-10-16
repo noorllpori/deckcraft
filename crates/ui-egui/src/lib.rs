@@ -20,6 +20,7 @@ pub mod panes;
 pub mod ribbon;
 pub mod selpane;
 pub mod show;
+mod playback;
 pub mod sorter;
 pub mod status;
 pub mod textures;
@@ -108,6 +109,8 @@ pub struct UiState {
     /// Keep the editor responsive on large decks by rendering only the active page at an
     /// adaptive screen-sized resolution and doing that render off the UI thread.
     pub performance_mode: bool,
+    /// Prepare the selected slide after navigation, then prepare remaining slides while idle.
+    pub playback_auto_compile: bool,
 }
 
 impl Default for UiState {
@@ -135,6 +138,7 @@ impl Default for UiState {
             format_tab: "fill".into(),
             grayscale: false,
             performance_mode: false,
+            playback_auto_compile: false,
         }
     }
 }
@@ -195,6 +199,8 @@ pub struct SlideApp {
     pub control_rx: Option<Receiver<ControlRequest>>,
     pub dialog: Option<dialogs::Dialog>,
     pub show: Option<show::Show>,
+    /// Precompiled display-sized textures used by slide-show playback.
+    pub playback_cache: playback::PlaybackCache,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
@@ -250,6 +256,7 @@ impl SlideApp {
             control_rx: None,
             dialog: None,
             show: None,
+            playback_cache: playback::PlaybackCache::default(),
             media: media::MediaHost::new(audio_out),
             status: None,
             toast: None,
@@ -964,6 +971,14 @@ impl SlideApp {
         }
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
+        if let Some((doc, revision, slide)) = self.session.active().map(|active| (active.doc.clone(), active.revision, active.selection.slide)) {
+            let size = show::playback_size_for_context(&ctx, &doc);
+            self.playback_cache.sync(doc, revision, size);
+            let user_active = ctx.input(|i| !i.events.is_empty() || i.pointer.any_down());
+            let now = ctx.input(|i| i.time);
+            self.playback_cache.auto_compile(self.ui.playback_auto_compile, slide, now, user_active);
+        }
+        self.playback_cache.tick(&ctx);
         self.tick_media(&ctx);
         if self.show.is_some() {
             show::ui(self, ui);

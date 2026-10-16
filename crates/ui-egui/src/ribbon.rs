@@ -1765,6 +1765,11 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
             let i = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
             app.start_show(i, false);
         }
+        let pre = big_button(ui, Icon::Sparkle, "Precompile\nPlayback", true)
+            .on_hover_text(crate::i18n::tr(ui.ctx(), "Prepare static slides at the display size before playback"));
+        if pre.clicked() {
+            app.dialog = Some(crate::dialogs::Dialog::new("playbackPrecompile"));
+        }
         let on = app.ui.presenter_view;
         if big_button_ex(ui, Icon::PresenterView, "Presenter\nView", true, false, on).0.clicked() {
             app.ui.presenter_view = !on;

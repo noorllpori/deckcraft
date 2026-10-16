@@ -41,3 +41,7 @@ sync_github_name = true
 [people.Silvertree2010]
 display_name = "Netter"
 sync_github_name = false
+
+[people.noorllpori]
+display_name = "葡萄拌大蒜"
+sync_github_name = false

@@ -166,7 +166,7 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
-    log::info!("DeckCraft {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
+    log::info!("DeckCraft 性能版 {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
     // The log file lives under the settings directory; opened after the arguments, so `--version`
     // leaves no file behind. Records logged until now are written to it first.
     if let Some(logger) = logger {
@@ -181,7 +181,7 @@ fn main() -> eframe::Result {
     }
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("DeckCraft")
+        .with_title("DeckCraft 性能版")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)
@@ -205,7 +205,7 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "windows")]
     graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
     eframe::run_native(
-        "DeckCraft",
+        "DeckCraft 性能版",
         options,
         Box::new(move |cc| {
             let mut app = SlideApp::new(Session::new(), services(cc.egui_ctx.clone()));

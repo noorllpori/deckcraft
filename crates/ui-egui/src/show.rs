@@ -42,6 +42,9 @@ pub struct Show {
     last_viewed: Option<usize>,
     /// Click areas of hyperlinks and shape actions on slide `.0`, in slide points.
     links: Option<(usize, Vec<deckcraft_render::PlacedLink>)>,
+    preparation_requested: bool,
+    last_anim_render: f64,
+    last_anim_frame: Option<(usize, usize)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -99,6 +102,9 @@ impl Show {
             media_slide: None,
             last_viewed: None,
             links: None,
+            preparation_requested: false,
+            last_anim_render: 0.0,
+            last_anim_frame: None,
         }
     }
 
@@ -179,7 +185,7 @@ impl Show {
     }
 }
 
-fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64) -> ShapeState {
+pub(crate) fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64) -> ShapeState {
     let a = tl.state(id, None, step, t);
     ShapeState {
         visible: a.visible,
@@ -204,6 +210,29 @@ fn fit(avail: Rect, doc: &Presentation) -> Rect {
     let (sw, sh) = (doc.slide_size.width as f32, doc.slide_size.height as f32);
     let s = (avail.width() / sw).min(avail.height() / sh);
     Rect::from_center_size(avail.center(), vec2(sw * s, sh * s))
+}
+
+fn playback_size(srect: Rect, ppp: f32) -> (u32, u32) {
+    // Keep the output close to a 2K display. Picture fills are decoded from
+    // their own on-screen bounds, so an image occupying half the slide gets
+    // roughly half the output width rather than a one-size-fits-all thumbnail.
+    const MAX_PIXELS: u64 = 3_686_400;
+    const MAX_SIDE: u32 = 2560;
+    let w = (srect.width() * ppp).round().max(1.0) as u32;
+    let h = (srect.height() * ppp).round().max(1.0) as u32;
+    let area = u64::from(w).saturating_mul(u64::from(h));
+    let side = w.max(h);
+    if area <= MAX_PIXELS && side <= MAX_SIDE { return (w, h); }
+    let a = (MAX_PIXELS as f64 / area.max(1) as f64).sqrt();
+    let s = MAX_SIDE as f64 / side.max(1) as f64;
+    let k = a.min(s).min(1.0);
+    (((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1))
+}
+
+pub fn playback_size_for_context(ctx: &egui::Context, doc: &Presentation) -> (u32, u32) {
+    let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(ctx.content_rect().size());
+    let r = Rect::from_min_size(Pos2::ZERO, monitor);
+    playback_size(fit(r, doc), ctx.pixels_per_point())
 }
 
 /// A transition layer as an egui mesh: [`deckcraft_anim::layer_mesh`]'s triangles (perspective
@@ -251,6 +280,16 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     };
     let now = ctx.input(|i| i.time);
     let Some(mut show) = app.show.take() else { return };
+    // Start preparing the cache in the background as soon as playback begins.
+    // Playback itself must not be blocked by the cache window: uncached slides
+    // already have a live render fallback and will switch to the prepared frame
+    // when their worker job completes.
+    if !show.started && !show.preview_only {
+        if !show.preparation_requested {
+            app.playback_cache.start(None);
+            show.preparation_requested = true;
+        }
+    }
     if !show.started {
         show.started = true;
         show.slide_start = now;
@@ -382,8 +421,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     painter.rect_filled(full, CornerRadius::ZERO, Color32::BLACK);
     let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
     let srect = fit(avail, &doc);
-    let ppp = ctx.pixels_per_point();
-    let size = ((srect.width() * ppp).round().max(1.0) as u32, (srect.height() * ppp).round().max(1.0) as u32);
+    let size = playback_size_for_context(&ctx, &doc);
     if show.ended {
         painter.text(
             pos2(full.center().x, full.min.y + 40.0),
@@ -410,7 +448,17 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         crate::media::gif_repaint(&ctx, &gifs);
         let gif = crate::media::gif_key(&gifs);
         let key = Key { slide: idx, step, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: hidden.clone(), gif };
-        let tex = if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
+        let cached = if !app.playback_cache.has_live_media(idx) && gifs.is_empty() && hidden.is_empty() {
+            app.playback_cache.texture(&ctx, idx, step, t, animating)
+        } else { None };
+        let anim_frame = (idx, step);
+        let render_anim = !animating || show.tex.is_none() || show.last_anim_frame != Some(anim_frame) || now - show.last_anim_render >= (1.0 / 30.0);
+        let tex = if let Some(cached) = cached {
+            show.tex = Some((key.clone(), cached.clone()));
+            Some(cached)
+        } else if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
+            show.tex.as_ref().map(|(_, t)| t.clone())
+        } else if animating && !render_anim {
             show.tex.as_ref().map(|(_, t)| t.clone())
         } else {
             let tl = show.timeline(&doc).clone();
@@ -445,6 +493,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 None => ctx.load_texture("show", ci, egui::TextureOptions::LINEAR),
             };
             show.tex = Some((key, tex.clone()));
+            if animating {
+                show.last_anim_render = now;
+                show.last_anim_frame = Some(anim_frame);
+            }
             Some(tex)
         };
         let mut drew = false;
@@ -499,7 +551,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 // Slides split into background and content are rendered once per transition;
                 // every frame only composites cached textures.
                 if tr.parts.is_none() && deckcraft_anim::uses_slide_parts(&tr.kind, &tr.option) {
-                    tr.parts = Some(part_textures(&ctx, &doc, tr.from, idx, size));
+                    let old = tr.from.and_then(|i| app.playback_cache.parts(&ctx, i));
+                    let new = app.playback_cache.parts(&ctx, idx);
+                    tr.parts = match (old, new) {
+                        (Some(a), Some(b)) => Some([Some(a[0].clone()), Some(a[1].clone()), Some(b[0].clone()), Some(b[1].clone())]),
+                        _ => Some(part_textures(&ctx, &doc, tr.from, idx, size)),
+                    };
                 }
                 let aspect = doc.slide_size.width / doc.slide_size.height.max(1.0);
                 let part = |k: usize| tr.parts.as_ref().and_then(|p| p.get(k).cloned().flatten());
@@ -670,6 +727,11 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     // Presenter view in a second window.
     if show.presenter && !show.reading && !show.ended {
+        if let Some(next) = deckcraft_anim::show_order(&doc).into_iter().find(|i| *i > show.state.slide)
+            && show.next_tex.as_ref().is_none_or(|(i, _)| *i != next)
+            && let Some(tex) = app.playback_cache.texture(&ctx, next, 0, 0.0, false) {
+            show.next_tex = Some((next, tex));
+        }
         presenter_window(&ctx, &mut show, &doc, now, &mut keep);
     }
     if keep {

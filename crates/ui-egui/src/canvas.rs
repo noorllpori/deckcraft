@@ -9,7 +9,6 @@
 use deckcraft_engine::tools::{Hit, box_handles};
 use deckcraft_engine::{Mods, PointerEvent, PointerKind, Target, ToolKind};
 use deckcraft_geom::{Point, Xfrm};
-use deckcraft_model::ShapeKind;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
@@ -121,7 +120,6 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     crate::media::gif_repaint(ui.ctx(), &gifs);
     let times: Vec<_> = gifs.iter().map(|g| (g.id, g.t)).collect();
     let st = app.session.active();
-    let drag_ids = if proxy { st.as_ref().map(|d| d.selection.shapes.clone()).unwrap_or_default() } else { vec![] };
     // One texture pixel in screen points, and the canvas in pixels from the slide's corner.
     let pixel = vec2(slide_rect.width() / px.0 as f32, slide_rect.height() / px.1 as f32);
     let visible = visible_region(avail, slide_rect, pixel);
@@ -129,7 +127,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, proxy, &drag_ids)
+            // Dragging uses a complete low-resolution frame so the renderer keeps
+            // the document's real z-order instead of layering a proxy above it.
+            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, proxy, &[])
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
@@ -142,21 +142,6 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         );
         app.canvas_region = Some(at);
         painter.image(tex.id(), at, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-    }
-    if proxy && drag_ids.len() == 1 {
-        if let Some(d) = app.session.active()
-            && let Some(slide) = d.doc.slides.get(d.selection.slide)
-            && let Some(shape) = slide.shape(drag_ids[0])
-        {
-            let x = deckcraft_engine::cmd::xfrm_of(&d.doc, &d.selection, shape);
-            let b = x.bounds();
-            if matches!(shape.kind, ShapeKind::Picture { .. } | ShapeKind::Media(_))
-                && let Some((drag_tex, drag_rect)) = app.textures.drag_shape(ui.ctx(), &d.doc, slide, drag_ids[0], b, scale as f64)
-            {
-                let r = screen_rect(xf, &Xfrm::new(drag_rect.x0, drag_rect.y0, drag_rect.width(), drag_rect.height()));
-                painter.image(drag_tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            }
-        }
     }
     app.perf.render_ms = app.textures.last_render_ms;
     media_frames(app, &painter, xf);
