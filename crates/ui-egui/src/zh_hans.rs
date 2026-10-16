@@ -692,6 +692,7 @@ pub const ZH_HANS: &[(&str, &str)] = &[
     ("Hide background graphics", "隐藏背景图形"),
     ("Hierarchy", "层次结构"),
     ("High", "高"),
+    ("High Performance", "高性能"),
     ("High Performance Mode", "高性能模式"),
     ("Highlighter", "荧光笔"),
     ("Histogram", "直方图"),
