@@ -63,6 +63,17 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         if icon_toggle(&mut child, Icon::PlayFromStart, "Play from Start (F5)", has_doc, false).clicked() {
             app.start_show(0, false);
         }
+        let perf = app.ui.performance_mode;
+        let perf_label = tr(ui.ctx(), "High Performance");
+        let perf_button = child.add(
+            egui::Button::new(egui::RichText::new(perf_label).size(12.0).color(if perf { t.accent_text } else { t.text_dim }))
+                .fill(if perf { t.accent } else { t.card })
+                .corner_radius(CornerRadius::same(5))
+                .min_size(vec2(112.0, 24.0)),
+        );
+        if perf_button.on_hover_text(tr(ui.ctx(), "High Performance Mode")).clicked() {
+            let _ = app.run("view.performance", json!({"on": !perf}));
+        }
         let title =
             app.session.active().map(|d| format!("{}{}", d.title(), if dirty { " — Edited" } else { "" })).unwrap_or_else(|| "DeckCraft".into());
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, title, theme::font(13.0), t.text);
