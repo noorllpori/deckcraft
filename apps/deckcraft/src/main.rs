@@ -40,6 +40,9 @@ impl eframe::App for App {
 
 /// The per-user settings directory: `ui.json`, `prefs.json` and `logs/` live here.
 fn config_dir() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("DECKCRAFT_CONFIG_DIR") {
+        return Some(std::path::PathBuf::from(dir));
+    }
     if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support/DeckCraft"))
     } else if cfg!(windows) {
