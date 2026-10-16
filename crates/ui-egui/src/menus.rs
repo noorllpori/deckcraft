@@ -201,6 +201,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Zoom In", "view.zoomIn"),
                 ("Zoom Out", "view.zoomOut"),
                 ("Fit to Window", "view.fit"),
+                ("High Performance Mode", "view.performance"),
             ],
         ),
         (

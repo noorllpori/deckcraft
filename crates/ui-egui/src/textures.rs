@@ -5,7 +5,10 @@
 //! in view (PowerPoint's Normal view shows off-slide objects; thumbnails clip to the slide).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    mpsc::{self, Receiver, TryRecvError},
+};
 
 use deckcraft_geom::Rect;
 use deckcraft_model::{Master, Presentation, ShapeId, Slide};
@@ -35,6 +38,17 @@ struct Entry {
     stamp: u64,
 }
 
+struct RenderedCanvas {
+    image: Image,
+    drawn: Rect,
+    elapsed_ms: f64,
+}
+
+struct PendingCanvas {
+    key: Key,
+    receiver: Receiver<RenderedCanvas>,
+}
+
 #[derive(Default)]
 pub struct Textures {
     canvas: Option<Entry>,
@@ -49,7 +63,12 @@ pub struct Textures {
     thumbs: HashMap<usize, Entry>,
     clock: u64,
     pub last_render_ms: f64,
+    performance_mode: bool,
+    pending: Option<PendingCanvas>,
 }
+
+const HIGH_PERFORMANCE_MAX_PIXELS: u64 = 1_800_000;
+const HIGH_PERFORMANCE_MAX_SIDE: u32 = 2_048;
 
 pub fn to_color_image(img: &Image, grayscale: bool) -> ColorImage {
     let w = img.width as usize;
@@ -85,6 +104,41 @@ fn threads() -> u16 {
 }
 
 impl Textures {
+    /// Enable the responsive editor path. Changing the mode drops GPU textures and any in-flight
+    /// canvas work so the next frame starts from one active slide.
+    pub fn set_performance_mode(&mut self, enabled: bool) {
+        if self.performance_mode == enabled {
+            return;
+        }
+        self.performance_mode = enabled;
+        self.canvas = None;
+        self.pending = None;
+        self.estimate = None;
+        self.drawn = None;
+        if enabled {
+            self.thumbs.clear();
+        }
+    }
+
+    /// The high-performance canvas is sized to the visible monitor budget rather than the full
+    /// logical zoom. This keeps a 400% zoom from allocating a huge texture while still adapting
+    /// to ordinary and high-DPI windows.
+    pub fn canvas_size(&self, size: (u32, u32)) -> (u32, u32) {
+        if !self.performance_mode {
+            return size;
+        }
+        let (w, h) = size;
+        let area = u64::from(w).saturating_mul(u64::from(h));
+        let side = w.max(h);
+        if area <= HIGH_PERFORMANCE_MAX_PIXELS && side <= HIGH_PERFORMANCE_MAX_SIDE {
+            return size;
+        }
+        let area_scale = (HIGH_PERFORMANCE_MAX_PIXELS as f64 / area.max(1) as f64).sqrt();
+        let side_scale = HIGH_PERFORMANCE_MAX_SIDE as f64 / side.max(1) as f64;
+        let factor = area_scale.min(side_scale).min(1.0);
+        (((w as f64 * factor).round() as u32).max(1), ((h as f64 * factor).round() as u32).max(1))
+    }
+
     /// The canvas texture for slide `index`, the slide being `size` pixels, and the region it
     /// covers: the slide, grown over the pasteboard to show what reaches off the slide within
     /// `visible` (the canvas, in pixels from the slide's top-left corner). `extra` changes with the
@@ -127,10 +181,34 @@ impl Textures {
             extra: extra ^ grayscale as u64,
             want,
         };
+        if self.performance_mode {
+            if let Some(pending) = self.pending.take() {
+                match pending.receiver.try_recv() {
+                    Ok(rendered) if pending.key == key => {
+                        self.commit_canvas(ctx, key.clone(), slide.clone(), master.clone(), want, rendered, grayscale, index);
+                    }
+                    Ok(_) => {}
+                    Err(TryRecvError::Empty) => self.pending = Some(pending),
+                    Err(TryRecvError::Disconnected) => {}
+                }
+            }
+        }
         if let Some(e) = &self.canvas
             && e.key == key
         {
             return Some((e.tex.clone(), e.region));
+        }
+        if self.performance_mode {
+            if self.pending.is_none() {
+                // Never show a different page while the newly selected page is rendering. The
+                // old page's texture is released here, keeping the active-page memory bound.
+                if self.canvas.as_ref().is_some_and(|e| e.key.slide != key.slide) {
+                    self.canvas = None;
+                }
+                self.start_async_canvas(p, index, key.clone(), scale, edit, gif_times, crate::i18n::placeholder_prompt(ctx));
+            }
+            ctx.request_repaint();
+            return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
         }
         let t0 = crate::now_ms();
         let render = |region: Region| {
@@ -172,12 +250,86 @@ impl Textures {
         Some((tex, region))
     }
 
+    fn commit_canvas(
+        &mut self,
+        ctx: &egui::Context,
+        key: Key,
+        slide: Arc<Slide>,
+        master: Option<Arc<Master>>,
+        region: Region,
+        rendered: RenderedCanvas,
+        grayscale: bool,
+        index: usize,
+    ) {
+        self.canvas_renders += 1;
+        self.drawn = Some((index, rendered.drawn));
+        self.last_render_ms = rendered.elapsed_ms;
+        let ci = to_color_image(&rendered.image, grayscale);
+        let tex = match self.canvas.take() {
+            Some(mut e) => {
+                e.tex.set(ci, TextureOptions::LINEAR);
+                e.tex
+            }
+            None => ctx.load_texture("slide-canvas", ci, TextureOptions::LINEAR),
+        };
+        self.canvas = Some(Entry { key, tex, region, _slide: slide, _master: master, stamp: 0 });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_async_canvas(
+        &mut self,
+        p: &Presentation,
+        index: usize,
+        key: Key,
+        scale: f64,
+        edit: bool,
+        gif_times: &[(ShapeId, f64)],
+        placeholder_prompt: Option<fn(deckcraft_model::PhType) -> &'static str>,
+    ) {
+        let (sender, receiver) = mpsc::channel();
+        let presentation = p.clone();
+        let times = gif_times.to_vec();
+        let region = key.want;
+        std::thread::spawn(move || {
+            let t0 = crate::now_ms();
+            let opts = RenderOpts {
+                scale,
+                edit,
+                gif_times: &times,
+                threads: threads(),
+                offset: region.offset(),
+                size: Some(region.size()),
+                placeholder_prompt,
+                ..Default::default()
+            };
+            let (image, drawn) = deckcraft_render::render_slide_drawn(&presentation, index, &opts);
+            let _ = sender.send(RenderedCanvas { image, drawn, elapsed_ms: crate::now_ms() - t0 });
+        });
+        self.pending = Some(PendingCanvas { key, receiver });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_async_canvas(
+        &mut self,
+        _p: &Presentation,
+        _index: usize,
+        _key: Key,
+        _scale: f64,
+        _edit: bool,
+        _gif_times: &[(ShapeId, f64)],
+        _placeholder_prompt: Option<fn(deckcraft_model::PhType) -> &'static str>,
+    ) {
+        // Web builds have no native worker pool; the synchronous path remains available there.
+        self.performance_mode = false;
+    }
+
     /// Force the canvas to re-render next time (fonts loaded, theme changed in place…).
     pub fn invalidate(&mut self) {
         self.canvas = None;
         self.estimate = None;
         self.drawn = None;
         self.thumbs.clear();
+        self.pending = None;
     }
 
     /// A thumbnail texture; renders at most `budget` new thumbnails per frame (returns None when
@@ -185,6 +337,7 @@ impl Textures {
     pub fn thumb(&mut self, ctx: &egui::Context, p: &Presentation, index: usize, width_px: u32, budget: &mut u32) -> Option<TextureHandle> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
+        let width_px = if self.performance_mode { width_px.min(180) } else { width_px };
         let h = (width_px as f64 * p.slide_size.height / p.slide_size.width.max(1.0)).round().max(1.0) as u32;
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
@@ -214,10 +367,12 @@ impl Textures {
         // Drop the old entry for this slide address; entries for slides that no longer exist age out.
         let region = key.want;
         self.thumbs.insert(key.slide, Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: clock });
-        if self.thumbs.len() > 600 {
+        let cache_limit = if self.performance_mode { 24 } else { 600 };
+        if self.thumbs.len() > cache_limit {
             let mut v: Vec<(usize, u64)> = self.thumbs.iter().map(|(k, e)| (*k, e.stamp)).collect();
             v.sort_by_key(|x| x.1);
-            for (k, _) in v.into_iter().take(200) {
+            let remove = if self.performance_mode { 8 } else { 200 };
+            for (k, _) in v.into_iter().take(remove) {
                 self.thumbs.remove(&k);
             }
         }

@@ -105,6 +105,9 @@ pub struct UiState {
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
     pub grayscale: bool,
+    /// Keep the editor responsive on large decks by rendering only the active page at an
+    /// adaptive screen-sized resolution and doing that render off the UI thread.
+    pub performance_mode: bool,
 }
 
 impl Default for UiState {
@@ -131,6 +134,7 @@ impl Default for UiState {
             ui_scale: 1.0,
             format_tab: "fill".into(),
             grayscale: false,
+            performance_mode: false,
         }
     }
 }
@@ -155,6 +159,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
+    ("view.performance", "High Performance Mode", None, "{on?: bool}"),
     ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
@@ -502,6 +507,11 @@ impl SlideApp {
                 self.restyle = true;
             }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
+            "view.performance" => {
+                let on = self.flag(p, self.ui.performance_mode);
+                self.ui.performance_mode = on;
+                self.textures.set_performance_mode(on);
+            }
             "show.start" => {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
                 self.start_show(from, false);
@@ -751,6 +761,7 @@ impl SlideApp {
         self.last_time = now;
         self.drain_control(ctx);
         i18n::set_language(ctx, self.ui.language);
+        self.textures.set_performance_mode(self.ui.performance_mode);
         if self.fonts_ready {
             self.drain_inbox();
         }
