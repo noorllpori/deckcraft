@@ -108,6 +108,10 @@ fn threads() -> u16 {
 }
 
 impl Textures {
+    pub fn is_performance_mode(&self) -> bool {
+        self.performance_mode
+    }
+
     /// Enable the responsive editor path. Changing the mode drops GPU textures and any in-flight
     /// canvas work so the next frame starts from one active slide.
     pub fn set_performance_mode(&mut self, enabled: bool) {
