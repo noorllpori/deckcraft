@@ -107,7 +107,11 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
             p.text(pos2(row.min.x + 14.0, img.min.y + 20.0), Align2::CENTER_TOP, "★", theme::font(10.0), t.text_faint);
         }
         let wpx = (tw * ppp).round() as u32;
-        match app.textures.thumb(ui.ctx(), &doc, i, wpx, &mut budget) {
+        // In a long deck, the loop also walks slides outside the scroll viewport. In high
+        // performance mode spend the preview budget on what the user can currently see; this
+        // prevents a scrolled-to page from staying white while slides 1–3 consume the budget.
+        let visible = !app.textures.is_performance_mode() || row.intersects(ui.clip_rect());
+        match visible.then(|| app.textures.thumb(ui.ctx(), &doc, i, wpx, &mut budget)).flatten() {
             Some(tex) => {
                 p.image(
                     tex.id(),
@@ -118,7 +122,7 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
             }
             None => {
                 p.rect_filled(img, CornerRadius::ZERO, Color32::WHITE);
-                need_more = true;
+                need_more = visible;
             }
         }
         if selected {

@@ -35,13 +35,14 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     let img = Rect::from_min_size(cell.min + vec2(18.0, 8.0), vec2(tw, th));
                     rects.push((i, cell));
                     let p = ui.painter();
-                    match app.textures.thumb(ui.ctx(), &doc, i, (tw * ppp) as u32, &mut budget) {
+                    let visible = !app.textures.is_performance_mode() || cell.intersects(ui.clip_rect());
+                    match visible.then(|| app.textures.thumb(ui.ctx(), &doc, i, (tw * ppp) as u32, &mut budget)).flatten() {
                         Some(tex) => {
                             p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                         }
                         None => {
                             p.rect_filled(img, CornerRadius::ZERO, Color32::WHITE);
-                            need_more = true;
+                            need_more = visible;
                         }
                     }
                     let id = doc.slides.get(i).map(|s| s.id);
