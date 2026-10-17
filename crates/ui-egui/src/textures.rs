@@ -52,6 +52,29 @@ struct PendingCanvas {
     receiver: Receiver<RenderedCanvas>,
 }
 
+/// Convert a texture region from the raster size it was rendered at to the size requested by
+/// the current frame. Proxy canvases deliberately use fewer pixels than the normal canvas, but
+/// both describe the same logical slide area. Keeping the region in the requested pixel space
+/// prevents a stale proxy texture from appearing tiny for the frame before the normal render is
+/// ready.
+fn region_for_size(region: Region, from: (u32, u32), to: (u32, u32)) -> Region {
+    if from == to || from.0 == 0 || from.1 == 0 {
+        return region;
+    }
+    let sx = to.0 as f64 / from.0 as f64;
+    let sy = to.1 as f64 / from.1 as f64;
+    let x = (region.x as f64 * sx).round();
+    let y = (region.y as f64 * sy).round();
+    let w = (region.w as f64 * sx).round().max(1.0);
+    let h = (region.h as f64 * sy).round().max(1.0);
+    Region {
+        x: x.clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        y: y.clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        w: w.min(u32::MAX as f64) as u32,
+        h: h.min(u32::MAX as f64) as u32,
+    }
+}
+
 #[derive(Default)]
 pub struct Textures {
     canvas: Option<Entry>,
@@ -281,7 +304,13 @@ impl Textures {
                 self.start_async_canvas(p, index, key.clone(), scale, edit, gif_times, crate::i18n::placeholder_prompt(ctx));
             }
             ctx.request_repaint();
-            return self.canvas.as_ref().map(|e| (e.tex.clone(), e.region));
+            return self.canvas.as_ref().map(|e| {
+                // The previous entry may be a low-resolution proxy from the drag. Its region is
+                // expressed in proxy pixels, while `canvas.rs` maps regions using the current
+                // normal-canvas pixel size. Convert it before returning so the image keeps the
+                // same on-screen bounds while the full-quality render is in flight.
+                (e.tex.clone(), region_for_size(e.region, e.key.size, key.size))
+            });
         }
         let t0 = crate::now_ms();
         let render = |region: Region| {

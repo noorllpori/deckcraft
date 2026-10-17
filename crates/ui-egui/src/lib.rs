@@ -32,6 +32,7 @@ pub mod widgets;
 mod zh_hans;
 
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc;
 
 use deckcraft_engine::{Mods, Session, UiRequest};
 use serde::{Deserialize, Serialize};
@@ -191,6 +192,24 @@ pub struct Perf {
     pub fps: f64,
 }
 
+enum IoDone {
+    Open { name: String, path: Option<String>, doc: deckcraft_model::Presentation },
+    Saved { path: String },
+}
+
+enum IoEvent {
+    Progress { fraction: f32, detail: String },
+    Done(IoDone),
+    Error(String),
+}
+
+struct IoJob {
+    rx: mpsc::Receiver<IoEvent>,
+    title: String,
+    fraction: f32,
+    detail: String,
+}
+
 pub struct SlideApp {
     pub session: Session,
     pub services: Services,
@@ -243,6 +262,7 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    io_job: Option<IoJob>,
 }
 
 impl SlideApp {
@@ -284,6 +304,7 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            io_job: None,
         }
     }
 
@@ -294,6 +315,181 @@ impl SlideApp {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status = Some((msg.into(), now_ms()));
+    }
+
+    fn start_open_bytes(&mut self, name: String, bytes: Vec<u8>, path: Option<String>) -> Result<(), String> {
+        if self.io_job.is_some() {
+            return Err("another file operation is already in progress".into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = mpsc::channel();
+            let title = format!("正在读取 {}", name);
+            let worker_name = name.clone();
+            std::thread::Builder::new()
+                .name("deckcraft-open".into())
+                .spawn(move || {
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.12, detail: "正在读取文件".into() });
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.35, detail: "正在解析演示文稿".into() });
+                    match deckcraft_engine::cmd::file::open_presentation(&worker_name, &bytes) {
+                        Ok(doc) => {
+                            let _ = tx.send(IoEvent::Progress { fraction: 0.92, detail: "正在准备编辑界面".into() });
+                            let _ = tx.send(IoEvent::Done(IoDone::Open { name: worker_name, path, doc }));
+                        }
+                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            self.io_job = Some(IoJob { rx, title, fraction: 0.04, detail: "正在准备读取".into() });
+            return Ok(());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let doc = deckcraft_engine::cmd::file::open_presentation(&name, &bytes).map_err(|e| e.to_string())?;
+            deckcraft_engine::cmd::file::add_opened(&mut self.session, &name, path, doc);
+            Ok(())
+        }
+    }
+
+    fn start_open_path(&mut self, path: String) -> Result<(), String> {
+        if self.io_job.is_some() {
+            return Err("another file operation is already in progress".into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = mpsc::channel();
+            let worker_path = path.clone();
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
+            std::thread::Builder::new()
+                .name("deckcraft-open-file".into())
+                .spawn(move || {
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.08, detail: "正在读取文件".into() });
+                    let bytes = match std::fs::read(&worker_path) {
+                        Ok(bytes) => bytes,
+                        Err(e) => { let _ = tx.send(IoEvent::Error(format!("{worker_path}: {e}"))); return; }
+                    };
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.35, detail: "正在解析演示文稿".into() });
+                    match deckcraft_engine::cmd::file::open_presentation(&worker_path, &bytes) {
+                        Ok(doc) => {
+                            let _ = tx.send(IoEvent::Progress { fraction: 0.92, detail: "正在准备编辑界面".into() });
+                            let _ = tx.send(IoEvent::Done(IoDone::Open { name, path: Some(worker_path), doc }));
+                        }
+                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            self.io_job = Some(IoJob { rx, title: "正在读取演示文稿".into(), fraction: 0.04, detail: "正在准备读取".into() });
+            return Ok(());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = self.services.read.as_ref().ok_or_else(|| "file reading is unavailable".to_string())?(&path)?;
+            self.start_open_bytes(path.clone(), bytes, Some(path))
+        }
+    }
+
+    fn start_save_job(&mut self, path: String, format: String) -> Result<(), String> {
+        if self.io_job.is_some() {
+            return Err("another file operation is already in progress".into());
+        }
+        let Some(active) = self.session.active() else { return Err("nothing to save".into()) };
+        let doc = active.doc.clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = mpsc::channel();
+            let worker_path = path.clone();
+            std::thread::Builder::new()
+                .name("deckcraft-save".into())
+                .spawn(move || {
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.12, detail: "正在整理演示文稿".into() });
+                    let bytes = match deckcraft_engine::cmd::file::save_bytes(&doc, &format) {
+                        Ok(bytes) => bytes,
+                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); return; }
+                    };
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.72, detail: "正在写入文件".into() });
+                    let tmp = format!("{worker_path}.saving");
+                    if let Err(e) = std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, &worker_path)) {
+                        let _ = tx.send(IoEvent::Error(format!("{worker_path}: {e}")));
+                        return;
+                    }
+                    let _ = tx.send(IoEvent::Progress { fraction: 0.96, detail: "正在完成保存".into() });
+                    let _ = tx.send(IoEvent::Done(IoDone::Saved { path: worker_path }));
+                })
+                .map_err(|e| e.to_string())?;
+            self.io_job = Some(IoJob { rx, title: "正在保存演示文稿".into(), fraction: 0.04, detail: "正在准备保存".into() });
+            return Ok(());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = deckcraft_engine::cmd::file::save_bytes(&doc, &format).map_err(|e| e.to_string())?;
+            let _ = (path, bytes);
+            Ok(())
+        }
+    }
+
+    fn poll_io(&mut self, ctx: &egui::Context) {
+        let Some(mut job) = self.io_job.take() else { return };
+        let mut finished = false;
+        loop {
+            match job.rx.try_recv() {
+                Ok(IoEvent::Progress { fraction, detail }) => { job.fraction = fraction; job.detail = detail; }
+                Ok(IoEvent::Done(done)) => {
+                    match done {
+                        IoDone::Open { name, path, doc } => {
+                            deckcraft_engine::cmd::file::add_opened(&mut self.session, &name, path.clone(), doc);
+                            if let Some(path) = path {
+                                self.ui.recent.retain(|p| p != &path);
+                                self.ui.recent.insert(0, path);
+                                self.ui.recent.truncate(12);
+                            }
+                            self.ui.view = ViewMode::Normal;
+                        }
+                        IoDone::Saved { path } => {
+                            if let Err(e) = deckcraft_engine::cmd::file::mark_saved(&mut self.session, Some(path.clone())) {
+                                self.set_status(e.to_string());
+                            } else {
+                                self.ui.recent.retain(|p| p != &path);
+                                self.ui.recent.insert(0, path.clone());
+                                self.ui.recent.truncate(12);
+                                self.set_status(format!("Saved {path}"));
+                            }
+                        }
+                    }
+                    finished = true;
+                }
+                Ok(IoEvent::Error(error)) => { self.set_status(error); finished = true; }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => { self.set_status("文件操作线程已停止"); finished = true; break; }
+            }
+        }
+        if finished {
+            ctx.request_repaint();
+        } else {
+            self.io_job = Some(job);
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn io_overlay(&self, ctx: &egui::Context) {
+        let Some(job) = &self.io_job else { return };
+        let screen = ctx.input(|i| i.viewport().inner_rect).unwrap_or(ctx.content_rect());
+        egui::Area::new(egui::Id::new("io-progress-overlay")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+            ui.set_min_size(screen.size());
+            ui.painter().rect_filled(ui.max_rect(), egui::CornerRadius::ZERO, egui::Color32::from_black_alpha(190));
+            let panel = egui::Rect::from_center_size(ui.max_rect().center(), egui::vec2(460.0, 150.0));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(430.0);
+                ui.vertical_centered(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(&job.title).size(19.0).strong());
+                    ui.add_space(12.0);
+                    ui.add(egui::ProgressBar::new(job.fraction.clamp(0.0, 1.0)).show_percentage());
+                    ui.add_space(8.0);
+                    ui.label(&job.detail);
+                    ui.add_space(8.0);
+                });
+            }));
+        });
     }
 
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
@@ -598,12 +794,7 @@ impl SlideApp {
     }
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
-        self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
-        self.ui.recent.retain(|p| p != path);
-        self.ui.recent.insert(0, path.to_string());
-        self.ui.recent.truncate(12);
-        self.ui.view = ViewMode::Normal;
-        Ok(())
+        self.start_open_path(path.to_string())
     }
 
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
@@ -631,13 +822,9 @@ impl SlideApp {
         let suggested = format!("{name}.{ext}");
         if let Some(pick) = self.services.pick_save.as_mut() {
             if let Some(path) = pick(&suggested) {
-                match self.session.execute("file.saveAs", &json!({"path": path})) {
-                    Ok(_) => {
-                        self.set_status(format!("Saved {path}"));
-                        self.ui.recent.retain(|p| *p != path);
-                        self.ui.recent.insert(0, path);
-                    }
-                    Err(e) => self.set_status(e.to_string()),
+                let kind = deckcraft_engine::cmd::file::format_for_path(&path).to_string();
+                if let Err(e) = self.start_save_job(path, kind) {
+                    self.set_status(e);
                 }
             }
         } else if let Some(dl) = self.services.download.as_mut()
@@ -656,7 +843,13 @@ impl SlideApp {
         let dirty: Vec<usize> = self.session.documents().iter().enumerate().filter(|(_, d)| d.is_dirty()).map(|(i, _)| i).collect();
         for i in dirty {
             self.session.set_active(i);
-            self.save();
+            if let Some(path) = self.session.active().and_then(|d| d.path.clone()) {
+                if let Err(e) = self.session.execute("file.save", &json!({"path": path})) {
+                    self.set_status(e.to_string());
+                }
+            } else {
+                self.save_as_dialog("deckcraft");
+            }
             if self.session.documents().get(i).is_some_and(|d| d.is_dirty()) {
                 return false;
             }
@@ -666,9 +859,10 @@ impl SlideApp {
 
     pub fn save(&mut self) {
         if self.session.active().and_then(|d| d.path.clone()).is_some() {
-            match self.session.execute("file.save", &json!({})) {
-                Ok(_) => self.set_status("Saved"),
-                Err(e) => self.set_status(e.to_string()),
+            let path = self.session.active().and_then(|d| d.path.clone()).unwrap_or_default();
+            let kind = deckcraft_engine::cmd::file::format_for_path(&path).to_string();
+            if let Err(e) = self.start_save_job(path, kind) {
+                self.set_status(e);
             }
         } else {
             self.save_as_dialog("deckcraft");
@@ -738,7 +932,11 @@ impl SlideApp {
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
-        if let Err(e) = self.session.execute(cmd, &p) {
+        if cmd == "file.openBytes" {
+            if let Err(e) = self.start_open_bytes(name.to_string(), bytes.to_vec(), None) {
+                self.set_status(e);
+            }
+        } else if let Err(e) = self.session.execute(cmd, &p) {
             self.set_status(e.to_string());
         }
     }
@@ -766,6 +964,10 @@ impl SlideApp {
             self.perf.fps = self.perf.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
         }
         self.last_time = now;
+        self.poll_io(ctx);
+        if self.io_job.is_some() {
+            return;
+        }
         self.drain_control(ctx);
         i18n::set_language(ctx, self.ui.language);
         self.textures.set_performance_mode(self.ui.performance_mode);
@@ -970,6 +1172,11 @@ impl SlideApp {
             return;
         }
         let t0 = now_ms();
+        if self.io_job.is_some() {
+            self.io_overlay(&ctx);
+            self.perf.frame_ms = now_ms() - t0;
+            return;
+        }
         let t = theme::Tokens::get(&ctx);
         if let Some((doc, revision, slide)) = self.session.active().map(|active| (active.doc.clone(), active.revision, active.selection.slide)) {
             let size = show::playback_size_for_context(&ctx, &doc);

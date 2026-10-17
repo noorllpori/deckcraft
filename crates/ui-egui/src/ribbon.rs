@@ -779,6 +779,7 @@ fn drawing_group(app: &mut SlideApp, ui: &mut Ui) {
         let sel = enabled(app, "shape.fill");
         let r = big_button(ui, Icon::Arrange, "Arrange", sel);
         egui::Popup::menu(&r).show(|ui| arrange_menu(app, ui));
+        big(app, ui, Icon::Settings, "Multi-\nFunction", "view.pane", json!({"pane": "multifunction"}));
         let r = big_button(ui, Icon::QuickStyles, "Quick\nStyles", sel);
         egui::Popup::menu(&r).width(330.0).show(|ui| quick_styles(app, ui));
         rows(ui, |ui| {
