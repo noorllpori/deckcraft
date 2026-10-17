@@ -1,5 +1,9 @@
 # DeckCraft 性能版
 
+当前版本：`0.6.2-performance.1`。长期维护分支：[`performance`](https://github.com/noorllpori/deckcraft/tree/performance)。本版独立维护，不并入上游或本仓库主线。
+
+完整信息：[功能与性能说明](docs/performance-edition.md) · [更新日志](CHANGELOG.md) · [维护规则](docs/performance-maintenance.md)。性能优化参数已列明，尚未提供对照跑分，不宣称固定提速倍数。
+
 这是 DeckCraft 的性能优化发行分支，基于基础版 DeckCraft，集中加入大文件编辑、拖动代理、放映预编译和自动缓存等性能改进，并包含简体中文界面。
 
 ## 贡献者分组
