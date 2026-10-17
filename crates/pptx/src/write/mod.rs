@@ -129,16 +129,18 @@ impl Exp<'_> {
     /// A relationship from `o` to a media item (embedded part, or external link).
     pub fn media_rel(&mut self, o: &mut Out, id: MediaId, kind: &str) -> Option<String> {
         let m = self.p.media(id)?;
-        if m.data.is_empty() {
-            let link = m.link.clone()?;
+        if let Some(link) = m.link.clone() {
             return Some(o.rels.add(kind, &link, true));
         }
         let part = self.media_part(id)?;
         Some(o.rels.add(kind, &opc::relative(&o.name, &part), false))
     }
+    pub fn media_is_external(&self, id: MediaId) -> bool {
+        self.p.media(id).is_some_and(|m| m.link.is_some())
+    }
     pub fn media_rel_new(&mut self, o: &mut Out, id: MediaId, kind: &str) -> Option<String> {
         let m = self.p.media(id)?;
-        if m.data.is_empty() {
+        if m.link.is_some() || m.data.is_empty() {
             return None;
         }
         let part = self.media_part(id)?;

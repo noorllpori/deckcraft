@@ -59,7 +59,7 @@ pub fn save(p: &Presentation) -> Result<Vec<u8>> {
         z.start_file("presentation.json", deflate).map_err(w)?;
         z.write_all(&json).map_err(|e| FormatError::Write(e.to_string()))?;
         for item in &p.media {
-            if item.link.is_some() && item.data.is_empty() {
+            if item.link.is_some() {
                 continue;
             }
             // Already-compressed media is stored, not deflated again.
@@ -108,6 +108,21 @@ pub fn load(bytes: &[u8]) -> Result<Presentation> {
     for item in &mut p.media {
         if let Ok(data) = read_entry(&mut z, &format!("media/{}", item.id.0)) {
             item.data = Arc::new(data);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if item.data.is_empty()
+            && let Some(link) = item.link.as_deref()
+            && let Ok(data) = std::fs::read(link.strip_prefix("file:///").unwrap_or(link))
+        {
+            // Keep a preview cache in memory while retaining the external link in the manifest.
+            // Saving the document still omits these bytes, so edits to the source file remain
+            // visible after the next open.
+            item.data = Arc::new(data);
+        }
+        if item.link.is_some() {
+            // The source may have changed since the manifest was saved. Hash the bytes that
+            // were actually loaded; a missing source must not reuse an old fingerprint.
+            item.content_hash = (!item.data.is_empty()).then(|| deckcraft_model::media_content_hash(&item.data));
         }
     }
     repair(&mut p);

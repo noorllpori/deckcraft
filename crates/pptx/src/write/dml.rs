@@ -106,7 +106,7 @@ pub fn blip_fill(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, pf: &PictureFil
         || adj.clear_color.is_some()
         || adj.bilevel.is_some()
         || adj.alpha_inv;
-    let a = A::new().a("r:embed", &rid);
+    let a = if x.media_is_external(pf.media) { A::new().a("r:link", &rid) } else { A::new().a("r:embed", &rid) };
     if has_kids {
         w.open("a:blip", a);
         if let Some(c) = adj.clear_color {

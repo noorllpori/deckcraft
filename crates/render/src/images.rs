@@ -101,7 +101,7 @@ fn duotone_rgb(a: &PictureAdjust) -> Option<(deckcraft_color::Rgba, deckcraft_co
     Some((rgb(d, deckcraft_color::Rgba::BLACK), rgb(l, deckcraft_color::Rgba::WHITE)))
 }
 
-/// Decode encoded bytes (PNG, JPEG, GIF, WebP, BMP, TIFF; WMF and EMF drawn at
+/// Decode encoded bytes (PNG, JPEG, GIF, WebP, BMP, TIFF, merged PSD; WMF and EMF drawn at
 /// [`crate::metafile::DEFAULT_SIDE`]) to straight RGBA.
 pub fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
     decode_at(bytes, crate::metafile::DEFAULT_SIDE)
@@ -115,6 +115,9 @@ fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     if crate::metafile::is_metafile(bytes) {
         return crate::metafile::rasterize(bytes, side);
     }
+    if bytes.starts_with(b"8BPS") {
+        return crate::psd::decode(bytes);
+    }
     let img = image::load_from_memory(bytes).ok()?;
     let (w, h) = (img.width(), img.height());
     if w == 0 || h == 0 || (w as u64) * (h as u64) > 400_000_000 {
@@ -127,6 +130,9 @@ fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
 /// pixel size, scaled by the resolution it records (PNG `pHYs`, JPEG JFIF density) when that
 /// isn't 96 dpi, as PowerPoint sizes pictures. `None` for metafiles and anything unreadable.
 pub fn natural_size(bytes: &[u8]) -> Option<(f64, f64)> {
+    if bytes.starts_with(b"8BPS") {
+        return crate::psd::dimensions(bytes).map(|(w, h)| (f64::from(w), f64::from(h)));
+    }
     if crate::metafile::is_metafile(bytes) {
         return None;
     }

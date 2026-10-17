@@ -99,7 +99,7 @@ fn services(ctx: egui::Context) -> Services {
             let label = |text| deckcraft_ui_egui::i18n::tr(&open_ctx, text);
             let d = rfd::FileDialog::new().set_title(label("Open"));
             let d = match purpose {
-                "picture" => d.add_filter(label("Pictures"), &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]),
+                "picture" => d.add_filter(label("Pictures"), &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "psd"]),
                 "audio" => d.add_filter(
                     label("Audio"),
                     &["wav", "mp3", "m4a", "m4b", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "aifc", "caf", "wma", "weba", "mka"],
@@ -181,7 +181,7 @@ fn main() -> eframe::Result {
     }
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-        .with_title("DeckCraft 性能版")
+            .with_title("DeckCraft 性能版")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)

@@ -9,6 +9,13 @@
 
 <h1 align="center">DeckCraft</h1>
 
+## DeckCraft 性能版 0.6.2-performance.1
+
+本分支由 [葡萄拌大蒜（@noorllpori）](https://github.com/noorllpori) 维护，基于上游 DeckCraft 增加性能优化与编辑工作流改进。
+新增 PSD 默认链接导入、点击图片后的哈希检查与后台刷新、图片打包／解包、中键平移和编辑区中心缩放。
+查看 [更新日志](CHANGELOG.md)、[PSD 支持范围](docs/psd-linked-pictures.md) 与 [B 站主页](https://space.bilibili.com/38222138)。
+基础版作者与贡献者的署名保留在下方及应用“关于”窗口中。
+
 <p align="center">
   <b>Presentations and slide shows; an open-source, clean-room reimplementation of Microsoft PowerPoint, rebuilt in pure Rust.</b>
 </p>

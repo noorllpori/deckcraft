@@ -72,18 +72,63 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         }
         return;
     }
-    let (content_rect, scale) = layout(app, avail);
+    let document_uid = st.uid;
+    let (mut content_rect, mut scale) = layout(app, avail);
     // Scroll when zoomed beyond the window.
     let scroll_id = ui.id().with("canvas_scroll");
     let mut offset: egui::Vec2 = ui.data_mut(|d| d.get_temp(scroll_id).unwrap_or_default());
-    let overflow = vec2((content_rect.width() + 56.0 - avail.width()).max(0.0), (content_rect.height() + 56.0 - avail.height()).max(0.0));
+    let view_id = ui.id().with("canvas_zoom_view");
+    let previous: Option<(u64, Rect, Rect, f32)> = ui.data_mut(|d| d.get_temp(view_id));
+    if app.ui.zoom.is_none() {
+        offset = egui::Vec2::ZERO;
+    } else if let Some((uid, old_view, old_slide, old_scale)) = previous {
+        if uid != document_uid {
+            // A new document starts centered at the retained zoom level.
+            offset = content_rect.center() - avail.center();
+        } else if (scale - old_scale).abs() > f32::EPSILON && old_scale > 0.0 {
+            // Preserve the slide coordinate under the viewport's center for every zoom entry
+            // point (slider, +/- keys, percentage dialog, and wheel/pinch below).
+            let anchor = (old_view.center() - old_slide.min) / old_scale;
+            offset = content_rect.min + anchor * scale - avail.center();
+        }
+    } else {
+        offset = content_rect.center() - avail.center();
+    }
+    let mut overflow = vec2((content_rect.width() + 56.0 - avail.width()).max(0.0), (content_rect.height() + 56.0 - avail.height()).max(0.0));
     let resp = ui.allocate_rect(avail, Sense::click_and_drag());
-    let (wheel, zoom_delta, pinch_pos) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-    if resp.hovered() {
+    // Middle-button navigation is UI state only: never route it through the object tools.
+    // Capture a press inside this canvas, then keep panning when the pointer leaves its rect.
+    let pan_id = ui.id().with("canvas_middle_pan");
+    let mut panning = ui.data_mut(|d| d.get_temp::<bool>(pan_id).unwrap_or(false));
+    let (middle_pressed, middle_down, primary_down, pointer_delta) = ui.input(|i| {
+        (
+            i.pointer.button_pressed(egui::PointerButton::Middle),
+            i.pointer.button_down(egui::PointerButton::Middle),
+            i.pointer.primary_down(),
+            i.pointer.delta(),
+        )
+    });
+    if middle_pressed && resp.hovered() && !primary_down && !app.session.tool.dragging() {
+        panning = true;
+    }
+    if !middle_down {
+        panning = false;
+    }
+    if panning {
+        offset -= pointer_delta;
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        ui.ctx().request_repaint();
+    }
+    ui.data_mut(|d| d.insert_temp(pan_id, panning));
+    let (wheel, zoom_delta) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));
+    if resp.hovered() && !panning {
         if (zoom_delta - 1.0).abs() > 1e-3 {
+            let anchor = (avail.center() - content_rect.min + offset) / scale;
             let cur = app.ui.zoom.unwrap_or(scale);
             app.ui.zoom = Some((cur * zoom_delta).clamp(0.1, 4.0));
-            let _ = pinch_pos;
+            (content_rect, scale) = layout(app, avail);
+            offset = content_rect.min + anchor * scale - avail.center();
+            overflow = vec2((content_rect.width() + 56.0 - avail.width()).max(0.0), (content_rect.height() + 56.0 - avail.height()).max(0.0));
         } else if overflow != egui::Vec2::ZERO {
             offset -= wheel;
         } else if wheel.y.abs() > 18.0 && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
@@ -102,6 +147,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     offset.y = offset.y.clamp(0.0, overflow.y);
     ui.data_mut(|d| d.insert_temp(scroll_id, offset));
     let slide_rect = content_rect.translate(-offset);
+    ui.data_mut(|d| d.insert_temp(view_id, (document_uid, avail, slide_rect, scale)));
     app.slide_rect = Some(slide_rect);
     app.canvas_scale = scale;
     let xf = Xf { origin: slide_rect.min, scale };
@@ -172,12 +218,16 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if app.ui.ruler {
         ruler(&painter, avail, slide_rect, scale, &t);
     }
-    pointer(app, ui, &resp, xf);
+    if !panning {
+        pointer(app, ui, &resp, xf);
+    }
     overlays(app, ui, &painter, xf, &t);
     ime_output(app, ui, xf);
-    media_bar(app, ui, xf);
-    gif_buttons(app, ui, xf, &gifs);
-    context_menu(app, &resp);
+    if !panning {
+        media_bar(app, ui, xf);
+        gif_buttons(app, ui, xf, &gifs);
+        context_menu(app, &resp);
+    }
 }
 
 /// The canvas `avail` in texture pixels (`pixel`: one pixel's size in points) from the slide's
@@ -408,6 +458,10 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     };
     if let Err(e) = r {
         app.set_status(e.to_string());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if primary && resp.hovered() {
+        app.request_picture_check();
     }
     // Cursor.
     let cursor = match (&app.session.tool.kind, &app.session.tool.hover) {

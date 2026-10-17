@@ -128,6 +128,26 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 ## Progress log
 
+2026-10-18: performance edition **0.6.2-performance.1**, source release with linked PSD
+pictures, hash-based background refresh, integrated media controls and canvas navigation.
+Release scope and validation: [CHANGELOG.md](CHANGELOG.md).
+
+Performance edition update (2026-10-18): editor zoom preserves the slide point at the viewport
+center across the zoom slider, shortcuts, percentage input and wheel/pinch. Fit-to-window
+resets panning; ordinary scroll bounds still apply. Build verification only; user review pending.
+
+Performance edition update (2026-10-18): hold the middle mouse button and drag to pan a
+zoomed canvas within its scroll bounds. The gesture moves the viewport, leaves slide objects
+unchanged, and shows a grabbing cursor. Build verification only; user validation pending.
+
+Performance edition update (2026-10-18): linked pictures retain SHA-256 fingerprints and
+check the source in a background worker on selection/re-click. Unchanged content keeps its
+render caches; failed reads preserve the old preview. Build verified; user validation pending.
+
+Performance edition update (2026-10-17): merged PSD images can be inserted as external links
+by default and refreshed from Multi-Function. Build verified; user validation pending.
+Scope and remaining limitations: [PSD linked pictures](docs/psd-linked-pictures.md).
+
 | Date | What landed |
 |---|---|
 | 2026-10-14 | Expanded Simplified Chinese UI: ribbon, galleries, panes, File/print/export pages, dialogs, show controls, common notices, native file pickers and editor placeholders; installed DengXian preference; saved manual switching and disabled unsupported languages; user validation pending |

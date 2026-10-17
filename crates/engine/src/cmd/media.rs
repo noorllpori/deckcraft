@@ -2,7 +2,10 @@
 //! requests the UI host carries out with its player ([`crate::UiRequest::Media`]); the host reports
 //! back through [`Session::media_status`], which `media.info` returns with the probe.
 
-use deckcraft_model::{MediaClip, ShapeId, ShapeKind};
+use std::sync::Arc;
+use std::{fs, path::Path};
+
+use deckcraft_model::{MediaClip, MediaId, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
 use super::*;
@@ -34,7 +37,181 @@ pub fn specs() -> Vec<CommandSpec> {
             poster_frame
         ),
         cmd!(noundo "media.gifPlay", "Play/Pause GIF", [], None, "{id?, play?: bool (default: toggle)} → {id, playing}", has_doc, gif_play),
+        cmd!("picture.embed", "Embed Picture", ["Picture Format", "Link"], None, "{id?}", has_selection, embed_picture),
+        cmd!("picture.extract", "Extract Picture", ["Picture Format", "Link"], None, "{id?, path}", has_selection, extract_picture),
+        cmd!("picture.refresh", "Refresh Linked Picture", ["Picture Format", "Link"], None, "{id?}", has_selection, refresh_picture),
+        cmd!("picture.applyRefresh", "Apply Linked Picture Update", [], None, "{} (prepared update from host)", has_doc, apply_picture_refresh),
     ]
+}
+
+fn picture_target(s: &Session, p: &Value, cmd: &str) -> Result<(ShapeId, MediaId)> {
+    let st = s.doc()?;
+    let ids = targets(s, p)?;
+    let found = ids.iter().find_map(|id| {
+        st.shape(*id).and_then(|sh| match &sh.kind {
+            ShapeKind::Picture { fill } => Some((sh.id, fill.media)),
+            _ => None,
+        })
+    });
+    found.ok_or_else(|| bad(cmd, "select a picture"))
+}
+
+fn linked_path(link: &str) -> &str {
+    link.strip_prefix("file:///").unwrap_or(link)
+}
+
+fn picture_bytes(s: &Session, media: MediaId, cmd: &str) -> Result<(String, String, Vec<u8>)> {
+    let st = s.doc()?;
+    let item = st.doc.media(media).ok_or_else(|| bad(cmd, "picture media is missing"))?;
+    let link = item.link.as_deref().ok_or_else(|| bad(cmd, "picture is already embedded"))?;
+    let bytes = fs::read(linked_path(link)).map_err(|e| EngineError::Other(format!("{link}: {e}")))?;
+    let content_type = super::insert::content_type(&item.name, &bytes);
+    if !content_type.starts_with("image/") || (content_type != "image/svg+xml" && deckcraft_render::decode_image(&bytes).is_none()) {
+        return Err(bad(cmd, "外部图片无法解码，已保留原预览。PSD 需要 RGB/灰度 8/16 位及兼容合成画面。"));
+    }
+    Ok((item.name.clone(), content_type.into(), bytes))
+}
+
+fn invalidate_picture_views(doc: &mut deckcraft_model::Presentation) {
+    // The editor/thumbnail/show caches key on slide/master Arc identities. Media bytes alone
+    // do not change those identities; clone them so refresh cannot leave a stale PSD preview.
+    for slide in &mut doc.slides {
+        *slide = Arc::new((**slide).clone());
+    }
+    for master in &mut doc.masters {
+        *master = Arc::new((**master).clone());
+    }
+}
+
+fn embed_picture(s: &mut Session, p: &Value) -> Result<Value> {
+    let (_, media) = picture_target(s, p, "picture.embed")?;
+    let (name, content_type, bytes) = picture_bytes(s, media, "picture.embed")?;
+    s.edit(|doc, _| {
+        let item = doc.media.iter_mut().find(|m| m.id == media).ok_or_else(|| bad("picture.embed", "picture media is missing"))?;
+        item.name = name;
+        item.content_type = content_type;
+        item.data = Arc::new(bytes);
+        item.link = None;
+        item.content_hash = None;
+        invalidate_picture_views(doc);
+        Ok(())
+    })?;
+    Ok(json!({"id": media, "embedded": true}))
+}
+
+fn extract_picture(s: &mut Session, p: &Value) -> Result<Value> {
+    let (_, media) = picture_target(s, p, "picture.extract")?;
+    let path = str_param(p, "path").ok_or_else(|| bad("picture.extract", "missing `path`"))?;
+    let st = s.doc()?;
+    let item = st.doc.media(media).ok_or_else(|| bad("picture.extract", "picture media is missing"))?;
+    let bytes = if item.data.is_empty() { picture_bytes(s, media, "picture.extract")?.2 } else { item.data.as_ref().clone() };
+    fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let name = Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| item.name.clone());
+    s.edit(|doc, _| {
+        let item = doc.media.iter_mut().find(|m| m.id == media).ok_or_else(|| bad("picture.extract", "picture media is missing"))?;
+        item.name = name;
+        // Keep the bytes as an in-memory preview cache while the link controls how the file is
+        // serialized. This lets the editor show the image immediately and still follow later
+        // refreshes from the source path.
+        item.content_hash = Some(deckcraft_model::media_content_hash(&bytes));
+        item.data = Arc::new(bytes);
+        item.link = Some(path.to_string());
+        Ok(())
+    })?;
+    Ok(json!({"id": media, "linked": path}))
+}
+
+fn refresh_picture(s: &mut Session, p: &Value) -> Result<Value> {
+    let (_, media) = picture_target(s, p, "picture.refresh")?;
+    let st = s.doc()?;
+    let item = st.doc.media(media).ok_or_else(|| bad("picture.refresh", "picture media is missing"))?;
+    match prepare_picture_refresh(st.uid, item)? {
+        Some(update) => s.apply_picture_refresh(update),
+        None => Ok(json!({"id": media, "refreshed": false})),
+    }
+}
+
+/// Validated worker result. The old bytes and document identity prevent stale results from
+/// overwriting a later refresh, embedding operation, undo, or a different open presentation.
+pub struct PreparedPicture {
+    uid: u64,
+    media: MediaId,
+    link: String,
+    previous: Arc<Vec<u8>>,
+    bytes: Arc<Vec<u8>>,
+    hash: String,
+    content_type: String,
+}
+
+/// Read/hash/decode off the UI thread; unchanged bytes never trigger a decode or document edit.
+pub fn prepare_picture_refresh(uid: u64, item: &deckcraft_model::MediaItem) -> Result<Option<PreparedPicture>> {
+    use std::io::Read;
+    let link = item.link.as_deref().ok_or_else(|| bad("picture.refresh", "picture is already embedded"))?;
+    let file = fs::File::open(linked_path(link)).map_err(|e| EngineError::Other(format!("{link}: {e}")))?;
+    let before = file.metadata().map_err(|e| EngineError::Other(e.to_string()))?;
+    const LIMIT: u64 = 512 << 20;
+    if !before.is_file() || before.len() > LIMIT {
+        return Err(bad("picture.refresh", "linked picture is not a regular file or exceeds 512 MiB"));
+    }
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(before.len() as usize).map_err(|e| EngineError::Other(e.to_string()))?;
+    file.take(LIMIT + 1).read_to_end(&mut bytes).map_err(|e| EngineError::Other(format!("{link}: {e}")))?;
+    let after = fs::metadata(linked_path(link)).map_err(|e| EngineError::Other(e.to_string()))?;
+    if bytes.len() as u64 > LIMIT
+        || before.len() != after.len()
+        || bytes.len() as u64 != after.len()
+        || before.modified().ok() != after.modified().ok()
+    {
+        return Err(bad("picture.refresh", "源文件正在写入，已保留当前预览，请保存完成后再点击图片。"));
+    }
+    let hash = deckcraft_model::media_content_hash(&bytes);
+    let previous_hash = item.content_hash.clone().unwrap_or_else(|| deckcraft_model::media_content_hash(&item.data));
+    if hash == previous_hash && !item.data.is_empty() {
+        return Ok(None);
+    }
+    let content_type = super::insert::content_type(&item.name, &bytes);
+    if !content_type.starts_with("image/") || (content_type != "image/svg+xml" && deckcraft_render::decode_image(&bytes).is_none()) {
+        return Err(bad("picture.refresh", "外部图片尚未保存完整或无法解码，已保留当前预览。"));
+    }
+    Ok(Some(PreparedPicture {
+        uid,
+        media: item.id,
+        link: link.into(),
+        previous: item.data.clone(),
+        bytes: Arc::new(bytes),
+        hash,
+        content_type: content_type.into(),
+    }))
+}
+
+impl Session {
+    /// Deliver a validated background result through the normal undoable command path.
+    pub fn apply_picture_refresh(&mut self, update: PreparedPicture) -> Result<Value> {
+        self.prepared_picture = Some(update);
+        let result = self.execute("picture.applyRefresh", &json!({}));
+        self.prepared_picture = None;
+        result
+    }
+}
+
+fn apply_picture_refresh(s: &mut Session, _: &Value) -> Result<Value> {
+    let update = s.prepared_picture.take().ok_or_else(|| bad("picture.applyRefresh", "no prepared update"))?;
+    let st = s.doc()?;
+    if st.uid != update.uid
+        || !st.doc.media(update.media).is_some_and(|m| m.link.as_deref() == Some(&update.link) && Arc::ptr_eq(&m.data, &update.previous))
+    {
+        return Ok(json!({"refreshed": false, "stale": true}));
+    }
+    let media = update.media;
+    s.edit(|doc, _| {
+        let item = doc.media.iter_mut().find(|m| m.id == media).ok_or_else(|| bad("picture.refresh", "picture media is missing"))?;
+        item.data = update.bytes;
+        item.content_hash = Some(update.hash);
+        item.content_type = update.content_type;
+        invalidate_picture_views(doc);
+        Ok(())
+    })?;
+    Ok(json!({"id": media, "refreshed": true}))
 }
 
 /// The media shape a command acts on: `id` / `ids` / the selection, else the only media shape on

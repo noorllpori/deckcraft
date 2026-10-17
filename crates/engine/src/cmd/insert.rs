@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Picture from File…",
             ["Insert", "Images", "Pictures"],
             None,
-            "{path? | data: base64, name?, rect?: [x,y,w,h]}",
+            "{path? | data: base64, name?, linked?: bool (PSD defaults to true when path is provided), rect?: [x,y,w,h]}",
             has_slide,
             picture
         ),
@@ -243,6 +243,8 @@ pub fn content_type(name: &str, bytes: &[u8]) -> &'static str {
         "image/webp"
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
         "audio/wav"
+    } else if bytes.starts_with(b"8BPS") {
+        "image/vnd.adobe.photoshop"
     } else if bytes.starts_with(b"BM") {
         "image/bmp"
     } else if bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*") {
@@ -289,12 +291,13 @@ pub fn content_type(name: &str, bytes: &[u8]) -> &'static str {
 
 /// Natural size of an image in points (96 dpi), fitted inside the slide.
 fn fitted(s: &Session, bytes: &[u8]) -> (f64, f64) {
-    let (w, h) = image::ImageReader::new(std::io::Cursor::new(bytes))
+    let dimensions = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .ok()
         .and_then(|r| r.into_dimensions().ok())
-        .map(|(w, h)| (w as f64 * 0.75, h as f64 * 0.75))
-        .unwrap_or((288.0, 216.0));
+        .map(|(w, h)| (w as f64, h as f64))
+        .or_else(|| deckcraft_render::image_natural_size(bytes));
+    let (w, h) = dimensions.map(|(w, h)| (w * 0.75, h * 0.75)).unwrap_or((288.0, 216.0));
     let size = s.active().map(|d| d.doc.slide_size).unwrap_or(deckcraft_model::defaults::WIDE);
     let k = (size.width * 0.9 / w.max(1.0)).min(size.height * 0.9 / h.max(1.0)).min(1.0);
     (w * k, h * k)
@@ -307,8 +310,28 @@ fn picture(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("insert.picture", format!("{name} is not a picture")));
     }
     if ct != "image/svg+xml" && deckcraft_render::decode_image(&bytes).is_none() {
+        if bytes.starts_with(b"8BPS") {
+            return Err(EngineError::Other(format!(
+                "{name}: PSD 无法读取。当前支持带合成画面的 RGB/灰度 8/16 位 PSD；请在 Photoshop 中启用“最大兼容性”后另存。暂不支持 CMYK、Lab、32 位和 PSB，解码内存上限为 256 MiB。"
+            )));
+        }
         return Err(EngineError::Other(format!("{name}: the picture can't be read")));
     }
+    let linked = bool_param(p, "linked").unwrap_or(ct == "image/vnd.adobe.photoshop" && str_param(p, "path").is_some());
+    let link = if linked {
+        let path = str_param(p, "path").ok_or_else(|| bad("insert.picture", "linked pictures require a local `path`"))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = std::path::absolute(path).map_err(|e| EngineError::Other(e.to_string()))?;
+            Some(path.to_string_lossy().into_owned())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Err(bad("insert.picture", "external file links require the desktop app"));
+        }
+    } else {
+        None
+    };
     let (w, h) = fitted(s, &bytes);
     // Into a selected empty picture/content placeholder, if there is one.
     let target_ph = s.active().and_then(|d| {
@@ -341,7 +364,25 @@ fn picture(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => [0.0; 4],
     };
-    let media = s.edit(|doc, _| Ok(doc.add_media(&name, ct, bytes)))?;
+    let media = s.edit(|doc, _| {
+        // Identical pixels at different source paths must remain independent links.
+        if link.is_none()
+            && let Some(item) = doc.media.iter().find(|m| m.link.is_none() && *m.data == bytes)
+        {
+            return Ok(item.id);
+        }
+        let id = deckcraft_model::MediaId(doc.alloc_id());
+        let content_hash = link.as_ref().map(|_| deckcraft_model::media_content_hash(&bytes));
+        doc.media.push(deckcraft_model::MediaItem {
+            id,
+            name: name.clone(),
+            content_type: ct.into(),
+            data: std::sync::Arc::new(bytes),
+            link,
+            content_hash,
+        });
+        Ok(id)
+    })?;
     let shape = Shape {
         xfrm: Some(rect),
         kind: ShapeKind::Picture { fill: PictureFill { media, crop, ..Default::default() } },

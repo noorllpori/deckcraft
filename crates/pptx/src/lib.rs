@@ -63,6 +63,7 @@ pub(crate) fn mime_for(name: &str) -> &'static str {
         "gif" => "image/gif",
         "bmp" => "image/bmp",
         "tif" | "tiff" => "image/tiff",
+        "psd" => "image/vnd.adobe.photoshop",
         "svg" => "image/svg+xml",
         "emf" => "image/x-emf",
         "wmf" => "image/x-wmf",

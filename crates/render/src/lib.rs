@@ -23,6 +23,7 @@ mod pattern;
 
 mod pathgrad;
 mod placed;
+mod psd;
 mod ramp;
 mod table;
 mod transition;
@@ -46,7 +47,7 @@ use vello_cpu::{RenderContext, Resources, peniko};
 
 pub use deckcraft_anim::{transition_frame, transition_layers, uses_slide_parts};
 pub use extent::{Region, TILE, layout_extent, pasteboard_region, slide_extent};
-pub use images::{decode as decode_image, gif_frame};
+pub use images::{decode as decode_image, gif_frame, natural_size as image_natural_size};
 pub use morph_path::PathMorph;
 pub use morph_text::TextMorph;
 pub use placed::{Placed, PlacedLink, PlacedText, place_slide};

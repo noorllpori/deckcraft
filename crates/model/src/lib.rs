@@ -815,6 +815,15 @@ pub struct MediaItem {
     pub data: Arc<Vec<u8>>,
     /// External link instead of embedded bytes.
     pub link: Option<String>,
+    /// SHA-256 of the cached external source bytes, persisted in the native manifest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+/// Stable content fingerprint for linked media (independent of timestamps and file names).
+pub fn media_content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -915,7 +924,7 @@ impl Presentation {
             return m.id;
         }
         let id = MediaId(self.alloc_id());
-        self.media.push(MediaItem { id, name: name.into(), content_type: content_type.into(), data: Arc::new(data), link: None });
+        self.media.push(MediaItem { id, name: name.into(), content_type: content_type.into(), data: Arc::new(data), link: None, content_hash: None });
         id
     }
     /// Section index containing a slide (by position), when sections exist.

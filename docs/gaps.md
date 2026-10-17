@@ -256,6 +256,11 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Revision history
 
+Performance edition status, 2026-10-18: PSD merged-image import is implemented for RGB/gray
+8/16-bit files, with hash-based background refresh on selection/re-click. Layer editing,
+other color modes, ICC conversion, continuous file watching and a
+PPTX PNG fallback remain open; see [PSD linked pictures](psd-linked-pictures.md).
+
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-14 | major | Expanded Chinese editor, dialogs, galleries and show controls; review, system detection and other languages remain |

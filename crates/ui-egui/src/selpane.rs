@@ -222,6 +222,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         } else if resp.clicked() {
             let m = ui.input(|i| i.modifiers);
             click(app, &rows, k, m.command || m.ctrl, m.shift);
+            #[cfg(not(target_arch = "wasm32"))]
+            app.request_picture_check();
             ui.memory_mut(|mem| mem.request_focus(row_id(row.id)));
         }
         if resp.drag_started() {

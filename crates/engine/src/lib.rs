@@ -351,6 +351,7 @@ pub struct Session {
     /// ends) instead of Windows and Linux (Ctrl+arrows by word or paragraph). Defaults to the
     /// platform DeckCraft was built for.
     pub mac_keys: bool,
+    pub(crate) prepared_picture: Option<cmd::media::PreparedPicture>,
 }
 
 impl Default for Session {
@@ -379,6 +380,7 @@ impl Session {
             media_status: Default::default(),
             gif_paused: Default::default(),
             mac_keys: cfg!(target_os = "macos"),
+            prepared_picture: None,
         }
     }
     /// A session with one new presentation open.

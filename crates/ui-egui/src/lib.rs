@@ -14,13 +14,15 @@ pub mod dialogs;
 pub mod fillui;
 pub mod i18n;
 pub mod icons;
+#[cfg(not(target_arch = "wasm32"))]
+mod linked_pictures;
 pub mod media;
 pub mod menus;
 pub mod panes;
+mod playback;
 pub mod ribbon;
 pub mod selpane;
 pub mod show;
-mod playback;
 pub mod sorter;
 pub mod status;
 pub mod textures;
@@ -31,8 +33,8 @@ pub mod uifonts;
 pub mod widgets;
 mod zh_hans;
 
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use deckcraft_engine::{Mods, Session, UiRequest};
 use serde::{Deserialize, Serialize};
@@ -263,6 +265,8 @@ pub struct SlideApp {
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
     io_job: Option<IoJob>,
+    #[cfg(not(target_arch = "wasm32"))]
+    link_checks: linked_pictures::LinkChecks,
 }
 
 impl SlideApp {
@@ -305,6 +309,8 @@ impl SlideApp {
             thumb_drag: None,
             selpane: selpane::State::default(),
             io_job: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            link_checks: Default::default(),
         }
     }
 
@@ -336,7 +342,9 @@ impl SlideApp {
                             let _ = tx.send(IoEvent::Progress { fraction: 0.92, detail: "正在准备编辑界面".into() });
                             let _ = tx.send(IoEvent::Done(IoDone::Open { name: worker_name, path, doc }));
                         }
-                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); }
+                        Err(e) => {
+                            let _ = tx.send(IoEvent::Error(e.to_string()));
+                        }
                     }
                 })
                 .map_err(|e| e.to_string())?;
@@ -366,7 +374,10 @@ impl SlideApp {
                     let _ = tx.send(IoEvent::Progress { fraction: 0.08, detail: "正在读取文件".into() });
                     let bytes = match std::fs::read(&worker_path) {
                         Ok(bytes) => bytes,
-                        Err(e) => { let _ = tx.send(IoEvent::Error(format!("{worker_path}: {e}"))); return; }
+                        Err(e) => {
+                            let _ = tx.send(IoEvent::Error(format!("{worker_path}: {e}")));
+                            return;
+                        }
                     };
                     let _ = tx.send(IoEvent::Progress { fraction: 0.35, detail: "正在解析演示文稿".into() });
                     match deckcraft_engine::cmd::file::open_presentation(&worker_path, &bytes) {
@@ -374,7 +385,9 @@ impl SlideApp {
                             let _ = tx.send(IoEvent::Progress { fraction: 0.92, detail: "正在准备编辑界面".into() });
                             let _ = tx.send(IoEvent::Done(IoDone::Open { name, path: Some(worker_path), doc }));
                         }
-                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); }
+                        Err(e) => {
+                            let _ = tx.send(IoEvent::Error(e.to_string()));
+                        }
                     }
                 })
                 .map_err(|e| e.to_string())?;
@@ -404,7 +417,10 @@ impl SlideApp {
                     let _ = tx.send(IoEvent::Progress { fraction: 0.12, detail: "正在整理演示文稿".into() });
                     let bytes = match deckcraft_engine::cmd::file::save_bytes(&doc, &format) {
                         Ok(bytes) => bytes,
-                        Err(e) => { let _ = tx.send(IoEvent::Error(e.to_string())); return; }
+                        Err(e) => {
+                            let _ = tx.send(IoEvent::Error(e.to_string()));
+                            return;
+                        }
                     };
                     let _ = tx.send(IoEvent::Progress { fraction: 0.72, detail: "正在写入文件".into() });
                     let tmp = format!("{worker_path}.saving");
@@ -432,7 +448,10 @@ impl SlideApp {
         let mut finished = false;
         loop {
             match job.rx.try_recv() {
-                Ok(IoEvent::Progress { fraction, detail }) => { job.fraction = fraction; job.detail = detail; }
+                Ok(IoEvent::Progress { fraction, detail }) => {
+                    job.fraction = fraction;
+                    job.detail = detail;
+                }
                 Ok(IoEvent::Done(done)) => {
                     match done {
                         IoDone::Open { name, path, doc } => {
@@ -457,9 +476,16 @@ impl SlideApp {
                     }
                     finished = true;
                 }
-                Ok(IoEvent::Error(error)) => { self.set_status(error); finished = true; }
+                Ok(IoEvent::Error(error)) => {
+                    self.set_status(error);
+                    finished = true;
+                }
                 Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => { self.set_status("文件操作线程已停止"); finished = true; break; }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.set_status("文件操作线程已停止");
+                    finished = true;
+                    break;
+                }
             }
         }
         if finished {
@@ -477,18 +503,20 @@ impl SlideApp {
             ui.set_min_size(screen.size());
             ui.painter().rect_filled(ui.max_rect(), egui::CornerRadius::ZERO, egui::Color32::from_black_alpha(190));
             let panel = egui::Rect::from_center_size(ui.max_rect().center(), egui::vec2(460.0, 150.0));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_min_width(430.0);
-                ui.vertical_centered(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(&job.title).size(19.0).strong());
-                    ui.add_space(12.0);
-                    ui.add(egui::ProgressBar::new(job.fraction.clamp(0.0, 1.0)).show_percentage());
-                    ui.add_space(8.0);
-                    ui.label(&job.detail);
-                    ui.add_space(8.0);
-                });
-            }));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(430.0);
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(&job.title).size(19.0).strong());
+                        ui.add_space(12.0);
+                        ui.add(egui::ProgressBar::new(job.fraction.clamp(0.0, 1.0)).show_percentage());
+                        ui.add_space(8.0);
+                        ui.label(&job.detail);
+                        ui.add_space(8.0);
+                    });
+                })
+            });
         });
     }
 
@@ -803,7 +831,7 @@ impl SlideApp {
                 let r = match self.services.read.as_ref().map(|r| r(&path)) {
                     Some(Ok(bytes)) => {
                         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        self.session.execute(cmd, &json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
+                        self.session.execute(cmd, &json!({"name": name, "path": path, "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
                     }
                     _ => self.session.execute(cmd, &json!({"path": path})),
                 };
@@ -814,6 +842,12 @@ impl SlideApp {
         } else if let Some(f) = self.services.open_async.as_mut() {
             f(purpose);
         }
+    }
+
+    /// Ask the host for a path without starting a save job. Used by media actions that export a
+    /// selected asset while keeping the presentation open.
+    pub fn pick_save_path(&mut self, suggested: &str) -> Option<String> {
+        self.services.pick_save.as_mut().and_then(|pick| pick(suggested))
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
@@ -906,6 +940,10 @@ impl SlideApp {
 
     /// A dropped or picked file: presentations open, media is inserted.
     pub fn open_or_insert_bytes(&mut self, name: &str, bytes: &[u8]) {
+        self.open_or_insert_source(name, bytes, None);
+    }
+
+    fn open_or_insert_source(&mut self, name: &str, bytes: &[u8], source: Option<&str>) {
         let lower = name.to_ascii_lowercase();
         let data = deckcraft_engine::cmd::base64_encode(bytes);
         let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
@@ -928,7 +966,11 @@ impl SlideApp {
             self.set_status(format!("{name}: DeckCraft can't open this kind of file"));
             return;
         };
-        let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
+        let p = if cmd == "slide.fromOutline" {
+            json!({"text": String::from_utf8_lossy(bytes)})
+        } else {
+            json!({"name": name, "data": data, "path": source})
+        };
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
@@ -969,6 +1011,8 @@ impl SlideApp {
             return;
         }
         self.drain_control(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_picture_checks(ctx);
         i18n::set_language(ctx, self.ui.language);
         self.textures.set_performance_mode(self.ui.performance_mode);
         if self.fonts_ready {
@@ -1005,7 +1049,7 @@ impl SlideApp {
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped file".into());
             match f.bytes() {
-                Ok(bytes) => self.open_or_insert_bytes(&name, &bytes),
+                Ok(bytes) => self.open_or_insert_source(&name, &bytes, Some(&f.path().to_string_lossy())),
                 Err(e) => self.set_status(e),
             }
         }

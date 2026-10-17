@@ -487,6 +487,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "block-buffer"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,6 +824,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpufeatures"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,6 +882,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "crypto-common"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+dependencies = [
+ "generic-array",
+ "typenum",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -877,7 +905,7 @@ checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
 name = "deckcraft"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "arboard",
  "cpal",
@@ -896,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-anim"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-geom",
  "deckcraft-model",
@@ -905,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-av1"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-bitstream",
  "rayon",
@@ -914,14 +942,14 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-bitstream"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "deckcraft-cli"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-engine",
  "deckcraft-mcp",
@@ -930,14 +958,14 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-color"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "deckcraft-engine"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-color",
  "deckcraft-fonts",
@@ -959,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-fonts"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "epaint_default_fonts",
  "harfrust 0.13.3",
@@ -971,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-format"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-model",
  "serde",
@@ -982,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-geom"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "kurbo",
  "serde",
@@ -990,7 +1018,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-h264"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-bitstream",
  "rayon",
@@ -999,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-hevc"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-bitstream",
  "rayon",
@@ -1008,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-isobmff"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-bitstream",
  "thiserror 2.0.21",
@@ -1016,11 +1044,11 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-matroska"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 
 [[package]]
 name = "deckcraft-mcp"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-engine",
  "deckcraft-render",
@@ -1030,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-media"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-av1",
  "deckcraft-h264",
@@ -1048,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-metafile"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "kurbo",
  "thiserror 2.0.21",
@@ -1056,27 +1084,28 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-model"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-color",
  "deckcraft-geom",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "deckcraft-ogg"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 
 [[package]]
 name = "deckcraft-opus"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 
 [[package]]
 name = "deckcraft-pdf"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-fonts",
  "deckcraft-model",
@@ -1091,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-pptx"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-color",
  "deckcraft-engine",
@@ -1107,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-render"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-anim",
  "deckcraft-color",
@@ -1116,6 +1145,7 @@ dependencies = [
  "deckcraft-metafile",
  "deckcraft-model",
  "deckcraft-text",
+ "flate2",
  "image",
  "kurbo",
  "log",
@@ -1126,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-text"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "chrono",
  "deckcraft-color",
@@ -1140,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-ui-egui"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-anim",
  "deckcraft-color",
@@ -1162,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-vp9"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-bitstream",
  "rayon",
@@ -1171,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-web"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "deckcraft-engine",
  "deckcraft-ui-egui",
@@ -1208,6 +1238,16 @@ dependencies = [
  "getopts",
  "image",
  "rayon",
+]
+
+[[package]]
+name = "digest"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+dependencies = [
+ "block-buffer",
+ "crypto-common",
 ]
 
 [[package]]
@@ -1733,6 +1773,16 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "generic-array"
+version = "0.14.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+dependencies = [
+ "typenum",
+ "version_check",
 ]
 
 [[package]]
@@ -3854,6 +3904,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4505,6 +4566,12 @@ checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
 dependencies = [
  "rustc-hash 2.1.3",
 ]
+
+[[package]]
+name = "typenum"
+version = "1.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "uds_windows"
@@ -5667,7 +5734,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.6.1"
+version = "0.6.2-performance.1"
 dependencies = [
  "serde_json",
 ]

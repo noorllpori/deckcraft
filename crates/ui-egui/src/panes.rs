@@ -44,16 +44,21 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 });
             });
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane.as_str() {
-                "format" => format_shape(app, ui),
-                "background" => background(app, ui),
-                "animation" => animation(app, ui),
-                "selection" => crate::selpane::show(app, ui),
-                "multifunction" => multifunction(app, ui),
-                "comments" => comments(app, ui),
-                "designer" => designer(app, ui),
-                _ => {}
-            });
+            if pane == "multifunction" {
+                // The multi-function pane has two fixed sections. Only its object list gets a
+                // scrollbar, so the selected object's properties remain visible below it.
+                multifunction(app, ui);
+            } else {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane.as_str() {
+                    "format" => format_shape(app, ui),
+                    "background" => background(app, ui),
+                    "animation" => animation(app, ui),
+                    "selection" => crate::selpane::show(app, ui),
+                    "comments" => comments(app, ui),
+                    "designer" => designer(app, ui),
+                    _ => {}
+                });
+            }
         });
 }
 
@@ -61,48 +66,14 @@ fn multifunction(app: &mut SlideApp, ui: &mut Ui) {
     // Keep the most useful inspection workflow visible as soon as this pane opens: the object
     // list stays on top and the properties of the current selection sit directly underneath it.
     ui.label(egui::RichText::new(crate::i18n::tr(ui.ctx(), "Selection Pane")).font(theme::bold(13.0)));
-    crate::selpane::show(app, ui);
+    egui::ScrollArea::vertical()
+        .id_salt("multifunction_selection_list")
+        .max_height(260.0)
+        .auto_shrink([false, false])
+        .show(ui, |ui| crate::selpane::show(app, ui));
     ui.separator();
     ui.label(egui::RichText::new(inspector_label(ui, "Selected element")).font(theme::bold(13.0)));
     selected_element_details(app, ui);
-    ui.separator();
-    ui.label(egui::RichText::new(crate::i18n::tr(ui.ctx(), "Common tools")).font(theme::bold(13.0)));
-    ui.label(crate::i18n::tr(ui.ctx(), "Open frequently used panes and playback tools from one place."));
-    ui.add_space(8.0);
-    let tools = [
-        ("Selection Pane", "selection", Icon::SelectionPane, "Manage object order, visibility and locks."),
-        ("Animation Pane", "animation", Icon::AnimationPane, "Review and edit animation timing."),
-        ("Format Shape", "format", Icon::Settings, "Edit fill, line, effects and size."),
-        ("Format Background", "background", Icon::FormatBackground, "Edit the current slide background."),
-        ("Comments", "comments", Icon::CommentsBubble, "Review comments on the presentation."),
-        ("Design Ideas", "designer", Icon::DesignIdeas, "Open design suggestions for the slide."),
-    ];
-    for (label, pane, icon, hint) in tools {
-        let r = ui.allocate_response(vec2(ui.available_width(), 38.0), Sense::click());
-        let t = Tokens::get(ui.ctx());
-        if r.hovered() {
-            ui.painter().rect_filled(r.rect, CornerRadius::same(5), t.hover);
-        }
-        icons::paint(ui.painter(), Rect::from_min_size(r.rect.min + vec2(8.0, 7.0), vec2(24.0, 24.0)), icon, t.text, false);
-        ui.painter().text(r.rect.min + vec2(42.0, 11.0), egui::Align2::LEFT_TOP, crate::i18n::tr(ui.ctx(), label), theme::font(13.0), t.text);
-        ui.painter().text(r.rect.min + vec2(42.0, 25.0), egui::Align2::LEFT_TOP, crate::i18n::tr(ui.ctx(), hint), theme::font(10.0), t.text_dim);
-        if r.clicked() {
-            app.ui.pane = Some(pane.into());
-        }
-        ui.add_space(3.0);
-    }
-    ui.separator();
-    let r = ui.allocate_response(vec2(ui.available_width(), 38.0), Sense::click());
-    let t = Tokens::get(ui.ctx());
-    if r.hovered() {
-        ui.painter().rect_filled(r.rect, CornerRadius::same(5), t.hover);
-    }
-    icons::paint(ui.painter(), Rect::from_min_size(r.rect.min + vec2(8.0, 7.0), vec2(24.0, 24.0)), Icon::Sparkle, t.text, false);
-    ui.painter().text(r.rect.min + vec2(42.0, 11.0), egui::Align2::LEFT_TOP, crate::i18n::tr(ui.ctx(), "Playback Precompile"), theme::font(13.0), t.text);
-    ui.painter().text(r.rect.min + vec2(42.0, 25.0), egui::Align2::LEFT_TOP, crate::i18n::tr(ui.ctx(), "Cache slides before playback"), theme::font(10.0), t.text_dim);
-    if r.clicked() {
-        app.dialog = Some(crate::dialogs::Dialog::new("playbackPrecompile"));
-    }
 }
 
 /// Compact inspector shown below the selection pane in Multi-Function. It intentionally reads the
@@ -111,11 +82,13 @@ fn multifunction(app: &mut SlideApp, ui: &mut Ui) {
 /// into the presentation.
 fn selected_element_details(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let Some(st) = app.session.active() else {
-        ui.label(egui::RichText::new(inspector_label(ui, "Open a presentation first.")).color(t.text_dim));
-        return;
+    let selected: Vec<deckcraft_model::Shape> = {
+        let Some(st) = app.session.active() else {
+            ui.label(egui::RichText::new(inspector_label(ui, "Open a presentation first.")).color(t.text_dim));
+            return;
+        };
+        st.selected_shapes().into_iter().cloned().collect()
     };
-    let selected = st.selected_shapes();
     if selected.is_empty() {
         ui.label(egui::RichText::new(inspector_label(ui, "Select an object to inspect its properties.")).color(t.text_dim));
         return;
@@ -125,7 +98,9 @@ fn selected_element_details(app: &mut SlideApp, ui: &mut Ui) {
         ui.label(egui::RichText::new(inspector_label(ui, "Select one object to see its detailed properties.")).color(t.text_dim));
         return;
     }
-    let sh = selected[0];
+    // The selected shapes and media below are owned clones, so the session can be mutably
+    // updated by the Embed/Extract/Refresh buttons without holding an immutable document borrow.
+    let sh = &selected[0];
     property_row(ui, "Name", &sh.name);
     let kind = shape_kind_label(ui, sh);
     property_row(ui, "Type", &kind);
@@ -151,21 +126,61 @@ fn selected_element_details(app: &mut SlideApp, ui: &mut Ui) {
     if let deckcraft_model::ShapeKind::Picture { fill } = &sh.kind {
         ui.add_space(4.0);
         ui.label(egui::RichText::new(crate::i18n::tr(ui.ctx(), "Picture")).font(theme::bold(12.0)));
-        if let Some(media) = st.doc.media(fill.media) {
+        let media = app.session.active().and_then(|d| d.doc.media(fill.media).cloned());
+        if let Some(media) = media {
             property_row(ui, "File name", &media.name);
             if let Some(link) = &media.link {
                 let source = inspector_label(ui, "External file");
                 property_row(ui, "Source", &source);
                 property_row(ui, "Link", link);
+                if media.data.starts_with(b"8BPS") {
+                    ui.label(inspector_label(ui, "PSD composite preview; save in Photoshop, then refresh."));
+                }
+                ui.add_space(6.0);
+                if inspector_action(ui, "Refresh").clicked() {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    app.request_picture_check();
+                    #[cfg(target_arch = "wasm32")]
+                    run(app, "picture.refresh", serde_json::json!({"id": sh.id.0}));
+                }
+                if inspector_action(ui, "Embed in presentation").clicked() {
+                    run(app, "picture.embed", serde_json::json!({"id": sh.id.0}));
+                }
             } else {
                 let source = inspector_label(ui, "Bundled in presentation");
                 property_row(ui, "Source", &source);
+                ui.add_space(6.0);
+                if inspector_action(ui, "Extract as external file…").clicked() {
+                    let suggested = if media.name.is_empty() { "picture.png".to_string() } else { media.name.clone() };
+                    if let Some(path) = app.pick_save_path(&suggested) {
+                        run(app, "picture.extract", serde_json::json!({"id": sh.id.0, "path": path}));
+                    }
+                }
             }
+            ui.add_space(6.0);
             property_row(ui, "Media ID", &media.id.to_string());
         } else {
             ui.label(egui::RichText::new(inspector_label(ui, "Media file is missing.")).color(t.text_dim));
         }
     }
+}
+
+/// Keep inspector actions visibly clickable even though the ribbon's global button style is flat.
+fn inspector_action(ui: &mut Ui, label: &str) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let label = inspector_label(ui, label);
+    ui.scope(|ui| {
+        let visuals = ui.visuals_mut();
+        visuals.widgets.inactive.weak_bg_fill = t.hover;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, t.text_faint);
+        visuals.widgets.hovered.weak_bg_fill = t.pressed;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, t.accent);
+        visuals.widgets.active.weak_bg_fill = t.selected;
+        visuals.widgets.active.bg_stroke = Stroke::new(1.5, t.accent);
+        ui.add_sized(vec2(ui.available_width(), 32.0), egui::Button::new(egui::RichText::new(label).color(t.text)).frame(true).corner_radius(5))
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+    })
+    .inner
 }
 
 fn property_row(ui: &mut Ui, label: &str, value: &str) {
@@ -177,6 +192,7 @@ fn property_row(ui: &mut Ui, label: &str, value: &str) {
 
 fn inspector_label(ui: &Ui, english: &str) -> String {
     let chinese = match english {
+        "PSD composite preview; save in Photoshop, then refresh." => "PSD 合成预览：在 Photoshop 保存后，点击图片自动检查更新，也可点击刷新。",
         "Selected element" => "选中元素",
         "Open a presentation first." => "请先打开一个演示文稿。",
         "Select an object to inspect its properties." => "选择一个对象以查看其属性。",
@@ -191,15 +207,14 @@ fn inspector_label(ui: &Ui, english: &str) -> String {
         "Media ID" => "媒体 ID",
         "External file" => "外部文件",
         "Bundled in presentation" => "已打包到演示文稿",
+        "Refresh" => "刷新",
+        "Embed in presentation" => "打包进演示文稿",
+        "Extract as external file…" => "解包为外部文件…",
         "Media file is missing." => "找不到媒体文件。",
         "(empty)" => "（空）",
         _ => return crate::i18n::tr(ui.ctx(), english).to_string(),
     };
-    if crate::i18n::language(ui.ctx()) == crate::i18n::Language::SimplifiedChinese {
-        chinese.to_string()
-    } else {
-        english.to_string()
-    }
+    if crate::i18n::language(ui.ctx()) == crate::i18n::Language::SimplifiedChinese { chinese.to_string() } else { english.to_string() }
 }
 
 fn shape_kind_label(ui: &Ui, shape: &deckcraft_model::Shape) -> String {
