@@ -7,14 +7,31 @@
   </a>
 </p>
 
-<h1 align="center">DeckCraft</h1>
+<h1 align="center">DeckCraft 性能版 · Performance Edition</h1>
 
 ## DeckCraft 性能版 0.6.2-performance.1
 
-本分支由 [葡萄拌大蒜（@noorllpori）](https://github.com/noorllpori) 维护，基于上游 DeckCraft 增加性能优化与编辑工作流改进。
-新增 PSD 默认链接导入、点击图片后的哈希检查与后台刷新、图片打包／解包、中键平移和编辑区中心缩放。
-查看 [更新日志](CHANGELOG.md)、[PSD 支持范围](docs/psd-linked-pictures.md) 与 [B 站主页](https://space.bilibili.com/38222138)。
-基础版作者与贡献者的署名保留在下方及应用“关于”窗口中。
+这是基于 [Storytold DeckCraft](https://github.com/storytold/deckcraft) 的独立性能增强分支，由 [葡萄拌大蒜（@noorllpori）](https://github.com/noorllpori) 维护。它不是上游官方发行版，也不要求将性能版功能合入上游主线。
+
+**长期维护分支：[`performance`](https://github.com/noorllpori/deckcraft/tree/performance)** · **当前版本：`0.6.2-performance.1`** · **主要面向 Windows 桌面端，仍在迭代。**
+
+| 目前可用 | 作用与边界 |
+|---|---|
+| 顶部高性能开关 | 后台渲染当前页，限制预览分辨率；高倍放大时可能变软，源图不被压缩覆盖 |
+| 拖动代理画面 | 降低整页渲染像素量，保留遮挡顺序；同页编辑等待期间保留上一帧 |
+| 放映预编译 | 提前缓存静态画面与动画帧，查看每页状态；支持切页／空闲自动编译 |
+| Multi-Function | 选择列表、元素属性、图片来源、链接刷新、打包／解包集中在一个面板 |
+| PSD 链接 | 本地 PSD 默认外链，显示合成画面；不是 PSD 图层编辑器 |
+| 点击自动刷新 | SHA-256 比对源文件，内容变化才后台更新；不是持续监视磁盘 |
+| 画布导航与中文 | 中键平移、编辑区中心缩放、简体中文界面 |
+
+**性能改善的重点是减少重复渲染、降低拖动时的像素工作量，以及把耗时准备移到后台。尚未完成同硬件、同文件的性能基准测试，因此不宣称“快几倍”或固定帧率。**
+
+阅读 [功能与性能说明](docs/performance-edition.md)、[更新日志](CHANGELOG.md)、[PSD 支持范围](docs/psd-linked-pictures.md) 和 [独立分支维护规则](docs/performance-maintenance.md)。版本发布在 [本 Fork 的 Releases](https://github.com/noorllpori/deckcraft/releases)；安装包以各版本实际附件为准，上游下载链接不代表本性能版。
+
+性能版贡献：[葡萄拌大蒜的 B 站主页](https://space.bilibili.com/38222138)。基础版作者、许可证和贡献者保留原有署名，并在应用“关于”中与性能版贡献分开。
+
+下方保留上游项目介绍，跨平台能力和官方渠道描述来自上游；本分支额外功能的范围与验证状态以以上文档为准。
 
 <p align="center">
   <b>Presentations and slide shows; an open-source, clean-room reimplementation of Microsoft PowerPoint, rebuilt in pure Rust.</b>

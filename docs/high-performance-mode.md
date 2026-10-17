@@ -1,24 +1,21 @@
 # High Performance Mode
 
-DeckCraft's editor has an optional high performance mode for presentations whose pages contain
-large pictures, many effects, or a large number of slides.
+Updated: 2026-10-18. The maintained branch is `performance`; see the full
+[capabilities and performance notes](performance-edition.md) for scope and limitations.
 
-The mode is available from **View > High Performance Mode** and from the status bar. It is a
-persisted UI preference, so it remains enabled after restarting the desktop application.
+Use the **High Performance** toggle in the top ribbon. The preference persists across launches.
+On desktop, the editor renders the current canvas on a worker and retains an available frame
+while a replacement is prepared. The normal performance canvas has a nominal budget of
+1,800,000 pixels / 2048 px longest side; the drag proxy uses 360,000 pixels / 960 px.
+The complete proxy respects object stacking. Thumbnail retention is capped at 24 entries
+instead of the ordinary mode's 600. These are cache/render policies, not measured speedups
+or a cap on total process memory; the document, original media and undo history remain loaded.
 
-When enabled, the editor:
+Editor proxies can appear softer at high zoom and do not replace source image bytes. Native
+workers are unavailable in the web path. The underlying slide renderer remains CPU based.
 
-- renders only the selected page's canvas texture and releases the previous page when navigation
-  moves to a different page;
-- limits the canvas texture to an adaptive screen-sized budget (about 1.8 million pixels and a
-  2048-pixel maximum side), so zooming in does not allocate a texture for the entire logical zoom;
-- renders the active page on a native worker thread and repaints when it is ready, keeping pointer
-  and page navigation responsive while the page is being prepared;
-- uses a compressed proxy canvas while an object is dragged, keeping the moving page visible while
-  the next proxy frame is prepared, then queues the normal adaptive render after release;
-- keeps a small, low-resolution thumbnail cache instead of retaining hundreds of page textures.
-
-The document model, saved presentation, export output, and slide-show rendering are unchanged.
-The mode is an editor responsiveness trade-off: a very high zoom can look softer until the mode is
-turned off. Web builds keep the setting but use the existing synchronous renderer because native
-worker threads are unavailable there.
+Slide-show precompilation is a separate feature: screen-sized static/animation frames are
+prepared in RAM, with identical tiles shared. Current limits include a 30 fps animation sampling
+rate, 2560 px longest output side, and a 2048 MiB playback-cache budget. Uncached pages and
+live media have rendering fallbacks. Preparation costs time and memory; no constant playback
+frame rate or performance percentage has been established by a reproducible benchmark.
