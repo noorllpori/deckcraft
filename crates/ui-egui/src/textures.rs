@@ -17,6 +17,9 @@ use egui::{ColorImage, TextureHandle, TextureOptions};
 
 #[derive(Clone, PartialEq)]
 struct Key {
+    /// Logical page index. The slide `Arc` identity changes after an edit, but that is still the
+    /// same page and its previous frame should remain visible while the replacement renders.
+    page: usize,
     slide: usize,
     master: usize,
     size: (u32, u32),
@@ -231,6 +234,7 @@ impl Textures {
             self.drag_snapshot = false;
         }
         let key = Key {
+            page: index,
             slide: Arc::as_ptr(&slide) as usize,
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
             size,
@@ -298,7 +302,7 @@ impl Textures {
             if self.pending.is_none() {
                 // Never show a different page while the newly selected page is rendering. The
                 // old page's texture is released here, keeping the active-page memory bound.
-                if !proxy && self.canvas.as_ref().is_some_and(|e| e.key.slide != key.slide) {
+                if !proxy && self.canvas.as_ref().is_some_and(|e| e.key.page != key.page) {
                     self.canvas = None;
                 }
                 self.start_async_canvas(p, index, key.clone(), scale, edit, gif_times, crate::i18n::placeholder_prompt(ctx));
@@ -447,6 +451,7 @@ impl Textures {
         let width_px = if self.performance_mode { width_px.min(180) } else { width_px };
         let h = (width_px as f64 * p.slide_size.height / p.slide_size.width.max(1.0)).round().max(1.0) as u32;
         let key = Key {
+            page: index,
             slide: Arc::as_ptr(&slide) as usize,
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
             size: (width_px, h),
